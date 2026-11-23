@@ -43,7 +43,8 @@ jobs:
 
       - name: Pruebas pytest del backend
         id: backend_tests
-        run: python -m pytest -q backend/tests --junitxml=test-results/backend.xml
+        working-directory: backend
+        run: python -m pytest -q tests --junitxml=../test-results/backend.xml
 
       - name: Build de Angular
         id: frontend_build
