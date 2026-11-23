@@ -46,12 +46,18 @@ def _test_status(testcase: ET.Element) -> str:
     return "passed"
 
 
-def build_junit_events(directory: Path) -> list[dict[str, object]]:
+def build_junit_events(
+    directory: Path, expected_files: Iterable[str] = ()
+) -> list[dict[str, object]]:
     report_files = sorted(directory.glob("*.xml"))
+    missing_files = sorted(set(expected_files) - {path.name for path in report_files})
+    if missing_files:
+        raise RuntimeError(f"Missing JUnit reports: {', '.join(missing_files)}.")
     if not report_files:
         print(f"WARNING: No JUnit XML reports found in {directory}.", file=sys.stderr)
         return []
 
+    print(f"JUnit reports found: {', '.join(path.name for path in report_files)}.")
     metadata = event_metadata()
     events: list[dict[str, object]] = []
     for report_path in report_files:
@@ -180,17 +186,25 @@ def main() -> int:
     parser.add_argument("--event", choices=("test_run", "deployment"), required=True)
     parser.add_argument("--outcome", action="append", default=[])
     parser.add_argument("--junit-dir", type=Path)
+    parser.add_argument("--expected-junit-file", action="append", default=[])
+    parser.add_argument("--require-http-metrics", action="store_true")
     arguments = parser.parse_args()
     try:
         events = [build_event(arguments.event, arguments.outcome)]
         if arguments.junit_dir is not None:
-            detail_events = build_junit_events(arguments.junit_dir)
+            all_steps_passed = bool(arguments.outcome) and all(
+                outcome == "success" for outcome in arguments.outcome
+            )
+            expected_files = arguments.expected_junit_file if all_steps_passed else []
+            detail_events = build_junit_events(arguments.junit_dir, expected_files)
             test_case_count = sum(event["event_type"] == "test_case" for event in detail_events)
             request_count = sum(event["event_type"] == "test_http_request" for event in detail_events)
             print(
                 f"Preparados {test_case_count} resultados individuales y "
                 f"{request_count} observaciones HTTP."
             )
+            if arguments.require_http_metrics and all_steps_passed and request_count == 0:
+                raise RuntimeError("No HTTP request metrics were found in the successful JUnit reports.")
             events.extend(detail_events)
         send_events(events)
     except RuntimeError as error:

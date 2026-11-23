@@ -110,8 +110,35 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: resultados-pruebas
-          path: test-results/*.xml
+          path: |
+            test-results/backend.xml
+            test-results/playwright-store.xml
+            test-results/playwright-matrix.xml
           if-no-files-found: ignore
+
+      - name: Registrar resumen y resultados individuales en OpenObserve
+        if: always() && github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
+          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
+          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
+          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
+          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
+        run: |
+          python scripts/report_pipeline.py \
+            --event test_run \
+            --outcome "${{ steps.reporter_tests.outcome }}" \
+            --outcome "${{ steps.backend_tests.outcome }}" \
+            --outcome "${{ steps.frontend_build.outcome }}" \
+            --outcome "${{ steps.test_stack.outcome }}" \
+            --outcome "${{ steps.playwright_tests.outcome }}" \
+            --outcome "${{ steps.test_stack_cleanup.outcome }}" \
+            --junit-dir test-results \
+            --expected-junit-file backend.xml \
+            --expected-junit-file playwright-store.xml \
+            --expected-junit-file playwright-matrix.xml \
+            --require-http-metrics
 
   deploy:
     name: Desplegar en EC2
@@ -306,38 +333,3 @@ jobs:
             --event deployment \
             --outcome "${{ needs.tests.result }}" \
             --outcome "${{ steps.deployment.outcome }}"
-
-  report-test-results:
-    name: Registrar resultados individuales de pruebas en OpenObserve
-    needs: tests
-    if: always() && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Descargar código
-        uses: actions/checkout@v4
-
-      - name: Descargar reportes JUnit
-        uses: actions/download-artifact@v4
-        with:
-          name: resultados-pruebas
-          path: test-results
-        continue-on-error: ${{ needs.tests.result != 'success' }}
-
-      - name: Registrar resumen y resultados individuales
-        if: always()
-        env:
-          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
-          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
-          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
-          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
-          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
-        run: |
-          python scripts/report_pipeline.py \
-            --event test_run \
-            --outcome "${{ needs.tests.outputs.reporter_tests }}" \
-            --outcome "${{ needs.tests.outputs.backend_tests }}" \
-            --outcome "${{ needs.tests.outputs.frontend_build }}" \
-            --outcome "${{ needs.tests.outputs.test_stack }}" \
-            --outcome "${{ needs.tests.outputs.playwright_tests }}" \
-            --outcome "${{ needs.tests.outputs.test_stack_cleanup }}" \
-            --junit-dir test-results

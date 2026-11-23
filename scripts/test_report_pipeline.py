@@ -75,7 +75,8 @@ class JUnitEventTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             for filename, suite_name, test_count in (
                 ("backend.xml", "backend.tests", 20),
-                ("playwright.xml", "e2e.test_ui_matrix", 1705),
+                ("playwright-store.xml", "e2e.test_store", 5),
+                ("playwright-matrix.xml", "e2e.test_ui_matrix", 1700),
             ):
                 root = ET.Element("testsuites")
                 suite = ET.SubElement(root, "testsuite", name=suite_name)
@@ -90,13 +91,19 @@ class JUnitEventTests(unittest.TestCase):
                 report_path = Path(temporary_directory) / filename
                 ET.ElementTree(root).write(report_path, encoding="utf-8", xml_declaration=True)
 
-            events = build_junit_events(Path(temporary_directory))
+            events = build_junit_events(
+                Path(temporary_directory),
+                ["backend.xml", "playwright-store.xml", "playwright-matrix.xml"],
+            )
 
         self.assertEqual(len(events), 1725)
         self.assertEqual(events[0]["test_suite"], "backend.tests")
         self.assertEqual(events[0]["test_name"], "test_case_0")
-        self.assertEqual(events[-1]["test_suite"], "e2e.test_ui_matrix")
-        self.assertEqual(events[-1]["test_name"], "test_case_1704")
+        matrix_cases = [
+            event for event in events if event["test_suite"] == "e2e.test_ui_matrix"
+        ]
+        self.assertEqual(len(matrix_cases), 1700)
+        self.assertEqual(matrix_cases[-1]["test_name"], "test_case_1699")
 
     def test_rejects_malformed_http_metrics(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -121,6 +128,11 @@ class JUnitEventTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Invalid HTTP request metrics"):
                 build_junit_events(Path(temporary_directory))
+
+    def test_requires_named_junit_reports_when_requested(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            with self.assertRaisesRegex(RuntimeError, "Missing JUnit reports: backend.xml"):
+                build_junit_events(Path(temporary_directory), ["backend.xml"])
 
 
 class EventBatchTests(unittest.TestCase):
