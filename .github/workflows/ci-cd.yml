@@ -216,16 +216,8 @@ jobs:
             restore_legacy
             exit 1
           fi
-          app_domain=$(sed -n 's/^APP_DOMAIN=//p' "$app_dir/.env")
-          observe_domain=$(sed -n 's/^OPENOBSERVE_DOMAIN=//p' "$app_dir/.env")
-          if [ -z "$app_domain" ] || [ -z "$observe_domain" ]; then
-            echo "APP_DOMAIN u OPENOBSERVE_DOMAIN no está configurado en .env." >&2
-            restore_legacy
-            exit 1
-          fi
           for attempt in $(seq 1 30); do
-            if curl --fail --silent --max-time 5 --resolve "$app_domain:443:127.0.0.1" "https://$app_domain/api/health" >/dev/null 2>&1 &&
-              curl --fail --silent --max-time 5 --resolve "$observe_domain:443:127.0.0.1" "https://$observe_domain/" >/dev/null 2>&1; then
+            if "${compose[@]}" exec -T api python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)" >/dev/null 2>&1; then
               exit 0
             fi
             sleep 2
@@ -235,6 +227,47 @@ jobs:
           fi
           restore_legacy
           exit 1
+          REMOTE
+
+      - name: Verificar HTTPS público
+        id: public_https
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --max-time 10 https://tienda-videojuegos.duckdns.org/api/health >/dev/null &&
+              curl --fail --silent --max-time 10 https://obs-videojuegos.duckdns.org/ >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "No se pudieron validar ambos dominios por HTTPS." >&2
+          exit 1
+
+      - name: Restaurar servicios anteriores si falla HTTPS
+        if: steps.public_https.outcome == 'failure'
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR || '/opt/compra-juegos' }}
+        run: |
+          ssh "$EC2_USER@$EC2_HOST" bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          set -eu
+          app_dir=$1
+          release_sha=$2
+          release="$app_dir/releases/$release_sha"
+          compose=(docker compose --project-name compra-juegos --env-file "$app_dir/.env" --file "$release/compose.yaml")
+          if ! "${compose[@]}" down; then
+            echo "No se pudo detener la nueva pila antes de restaurar." >&2
+          fi
+          failed=false
+          for container in api-proxy api-blue api-green webapp-container; do
+            if docker inspect "$container" >/dev/null 2>&1 && [ "$(docker inspect -f '{{.State.Running}}' "$container")" = false ]; then
+              if ! docker start "$container"; then
+                echo "No se pudo restaurar el contenedor previo $container." >&2
+                failed=true
+              fi
+            fi
+          done
+          if [ "$failed" = true ]; then exit 1; fi
           REMOTE
 
       - name: Registrar resultado de pruebas en OpenObserve
