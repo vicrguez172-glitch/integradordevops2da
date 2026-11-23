@@ -15,3 +15,4 @@ backend/data
 !.env.example
 playwright-report
 test-results
+junit-reports

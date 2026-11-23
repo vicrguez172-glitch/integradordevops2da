@@ -7,6 +7,7 @@
 /backend/data
 /openobserve-data
 /test-results
+/junit-reports
 /playwright-report
 **/__pycache__/
 **/.pytest_cache/

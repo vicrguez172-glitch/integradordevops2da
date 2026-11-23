@@ -51,11 +51,12 @@ jobs:
           python -m pip install -r e2e/requirements.txt
           npm ci
           mkdir -p test-results
+          mkdir -p junit-reports
 
       - name: Pruebas pytest del backend
         id: backend_tests
         working-directory: backend
-        run: python -m pytest -v tests --junitxml=../test-results/backend.xml
+        run: python -m pytest -v tests --junitxml=../junit-reports/backend.xml
 
       - name: Build de Angular
         id: frontend_build
@@ -97,8 +98,8 @@ jobs:
           E2E_ADMIN_EMAIL: admin@example.com
           E2E_ADMIN_PASSWORD: e2e-only-admin-password
         run: |
-          python -m pytest -v -s e2e/test_store.py --junitxml=test-results/playwright-store.xml
-          python -m pytest -v -s -n 4 e2e/test_ui_matrix.py --junitxml=test-results/playwright-matrix.xml
+          python -m pytest -v -s e2e/test_store.py --junitxml=junit-reports/playwright-store.xml
+          python -m pytest -v -s -n 4 e2e/test_ui_matrix.py --junitxml=junit-reports/playwright-matrix.xml
 
       - name: Detener entorno de pruebas
         id: test_stack_cleanup
@@ -111,9 +112,9 @@ jobs:
         with:
           name: resultados-pruebas
           path: |
-            test-results/backend.xml
-            test-results/playwright-store.xml
-            test-results/playwright-matrix.xml
+            junit-reports/backend.xml
+            junit-reports/playwright-store.xml
+            junit-reports/playwright-matrix.xml
           if-no-files-found: ignore
 
       - name: Registrar resumen y resultados individuales en OpenObserve
@@ -134,7 +135,7 @@ jobs:
             --outcome "${{ steps.test_stack.outcome }}" \
             --outcome "${{ steps.playwright_tests.outcome }}" \
             --outcome "${{ steps.test_stack_cleanup.outcome }}" \
-            --junit-dir test-results \
+            --junit-dir junit-reports \
             --expected-junit-file backend.xml \
             --expected-junit-file playwright-store.xml \
             --expected-junit-file playwright-matrix.xml \
