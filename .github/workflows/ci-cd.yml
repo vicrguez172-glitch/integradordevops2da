@@ -56,6 +56,14 @@ jobs:
         id: frontend_build
         run: npm run build
 
+      - name: Guardar frontend probado para despliegue
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: dist/compra-juegos/browser
+          if-no-files-found: error
+
       - name: Instalar navegador Playwright
         run: python -m playwright install --with-deps chromium
 
@@ -109,6 +117,12 @@ jobs:
       - name: Descargar código
         uses: actions/checkout@v4
 
+      - name: Descargar frontend probado
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: deployment-dist
+
       - name: Verificar secretos de EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -135,7 +149,11 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Empaquetar versión probada
-        run: git archive --format=tar HEAD | gzip -n > compra-juegos.tar.gz
+        run: |
+          git archive --format=tar HEAD | gzip -n > compra-juegos.tar.gz
+          mkdir -p deployment-context/dist/compra-juegos/browser
+          cp -R deployment-dist/. deployment-context/dist/compra-juegos/browser/
+          tar -czf frontend-dist.tar.gz -C deployment-context dist
 
       - name: Actualizar contenedores en EC2
         id: deployment
@@ -151,6 +169,7 @@ jobs:
           target="$EC2_USER@$EC2_HOST"
           ssh "$target" "mkdir -p '$EC2_APP_DIR/releases'"
           scp compra-juegos.tar.gz "$target:$EC2_APP_DIR/release-$GITHUB_SHA.tar.gz"
+          scp frontend-dist.tar.gz "$target:$EC2_APP_DIR/frontend-$GITHUB_SHA.tar.gz"
           ssh "$target" bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
           set -eu
           app_dir=$1
@@ -158,10 +177,12 @@ jobs:
           release="$app_dir/releases/$release_sha"
           mkdir -p "$release"
           tar -xzf "$app_dir/release-$release_sha.tar.gz" -C "$release"
+          tar -xzf "$app_dir/frontend-$release_sha.tar.gz" -C "$release"
           rm "$app_dir/release-$release_sha.tar.gz"
+          rm "$app_dir/frontend-$release_sha.tar.gz"
           cd "$app_dir"
           compose=(docker compose --project-name compra-juegos --env-file "$app_dir/.env" --file "$release/compose.yaml")
-          "${compose[@]}" pull caddy openobserve otel-collector
+          "${compose[@]}" pull caddy openobserve otel-collector web
           legacy_containers=(api-proxy api-blue api-green webapp-container)
           stopped_containers=()
           restore_legacy() {
@@ -185,10 +206,6 @@ jobs:
             fi
           done
           if ! "${compose[@]}" build api; then
-            restore_legacy
-            exit 1
-          fi
-          if ! "${compose[@]}" build web; then
             restore_legacy
             exit 1
           fi
