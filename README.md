@@ -51,7 +51,7 @@ Abre <http://localhost:4200>. El proxy de desarrollo envía `/api` a `http://127
 
 ```powershell
 cd backend
-python -m pytest -q
+python -m pytest -v
 ```
 
 Con la API y el frontend activos, abre otra terminal:
@@ -63,8 +63,8 @@ python -m playwright install chromium
 $env:E2E_BASE_URL = "http://127.0.0.1:4200"
 $env:E2E_ADMIN_EMAIL = "admin@example.com"
 $env:E2E_ADMIN_PASSWORD = "local-admin-change-this"
-python -m pytest -q -s test_store.py
-python -m pytest -q -s -n 4 test_ui_matrix.py
+python -m pytest -v -s test_store.py
+python -m pytest -v -s -n 4 test_ui_matrix.py
 ```
 
 La suite backend cubre las 15 operaciones HTTP de la API, sus permisos y los principales errores/validaciones. Playwright ejecuta cinco recorridos completos y una matriz funcional de 1,700 casos: navegación por header/footer, carrito, login/registro, validación de formularios CRUD y filtros representativos. En Docker, los cinco recorridos pasaron en 26.24 segundos y la matriz con cuatro workers en 478.43 segundos. GitHub Actions ejecuta esos mismos comandos con un timeout de 15 minutos. El reporte de validación está en [runtime-validation-report.md](runtime-validation-report.md).
@@ -111,9 +111,9 @@ El entorno de pruebas usa credenciales fijas únicamente para el contenedor e2e 
 
 La API envía logs estructurados, trazas FastAPI/SQLAlchemy y métricas HTTP OTLP al OpenTelemetry Collector. Las métricas HTTP incluyen ruta, método, status code, contador y duración. El Collector envía señales a OpenObserve por OTLP/HTTP. Caddy termina TLS para el sitio y OpenObserve; Prometheus/Grafana no son necesarios para los dashboards incluidos en esta arquitectura.
 
-El Collector también consulta cada 30 segundos métricas de host Linux para CPU, memoria, red y sensores térmicos disponibles. La temperatura depende de que EC2 exponga un sensor en `sysfs/hwmon`; algunas instancias no exponen temperatura y en ese caso la métrica no aparecerá. Los contenedores de Windows/Docker Desktop no representan necesariamente los sensores del host Windows.
+El Collector consulta cada 30 segundos métricas de host Linux para CPU, memoria y red. La temperatura depende de que EC2 exponga un sensor en `sysfs/hwmon`; esta instancia fue inspeccionada y no tiene sensores térmicos disponibles, así que no puede reportar °C. No confundas CPU utilizada con temperatura.
 
-Configurar y guardar dashboards y alertas en la interfaz de OpenObserve. EC2 no publica directamente el puerto 5080; la interfaz se sirve por el subdominio HTTPS de OpenObserve.
+El dashboard `Operación CompraJuegos` ya está guardado en OpenObserve y muestra CPU, RAM y red. Para guardar una alerta, OpenObserve exige un destino de notificación o workflow; esta instalación no tiene SMTP configurado. Agrega un webhook real o configura SMTP antes de crear alertas. EC2 no publica directamente el puerto 5080; la interfaz se sirve por el subdominio HTTPS de OpenObserve.
 
 ## GitHub Actions y EC2
 

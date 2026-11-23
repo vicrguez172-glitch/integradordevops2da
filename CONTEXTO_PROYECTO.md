@@ -1,6 +1,6 @@
 # Contexto de continuidad — Proyecto Parcial 2: Compra de juegos
 
-Usa este documento como contexto inicial si el trabajo continúa en otra sesión. Es un resumen del PDF `Proyecto parcial2 GestionProcesoDesarrollo.pdf` y de los requisitos adicionales proporcionados por el estudiante. No representa una implementación de esos requisitos.
+Usa este documento como contexto inicial si el trabajo continúa en otra sesión. Resume los requisitos del PDF `Proyecto parcial2 GestionProcesoDesarrollo.pdf`, los requisitos adicionales y el estado actual de su implementación.
 
 ## Información de la entrega
 
@@ -52,7 +52,7 @@ La carpeta `compra-juegos` contiene la aplicación Angular CLI 20.3.16 y un back
 - Contraseñas con hash scrypt; tokens firmados con vencimiento; la cuenta inicial de admin se configura con variables de entorno.
 - El catálogo incluye juegos de demostración. La compra confirma una orden local; no integra procesamiento de pagos.
 - Logs JSON de solicitudes con timestamp, método, ruta, status code y duración; métricas OpenTelemetry de conteo/duración por endpoint y trazas FastAPI/SQLAlchemy cuando se configura el exportador OTLP.
-- Pruebas API en `backend/tests/`: `4 passed` usando `python -m pytest -q` (Python 3.10 local). Las dependencias se declaran en `backend/requirements.txt`.
+- Pruebas API en `backend/tests/`: suite actual de `20 passed`, ejecutada con pytest. Las dependencias se declaran en `backend/requirements.txt`.
 
 ### Parte terminada: tienda Angular inicial
 
@@ -77,7 +77,7 @@ La carpeta `compra-juegos` contiene la aplicación Angular CLI 20.3.16 y un back
 
 ### Parte implementada: CI/CD y publicación de eventos
 
-- `.github/workflows/ci-cd.yml` contiene trabajos para pytest, build de Angular y Playwright. El deploy SSH está condicionado al éxito del trabajo de pruebas y solo corre en push a `main`.
+- `.github/workflows/ci-cd.yml` contiene trabajos para pytest, build de Angular y Playwright. El deploy SSH está condicionado al éxito del trabajo de pruebas y solo corre en push a `main`. Los eventos de CI/CD ya fueron aceptados por OpenObserve.
 - `compose.e2e.yaml` proporciona una pila de prueba sin OpenObserve ni credenciales productivas.
 - `scripts/report_pipeline.py` envía eventos HTTP/JSON a OpenObserve con status, commit, rama, actor, workflow y run ID. Se verificó localmente contra un servidor HTTP simulado, incluyendo URL y Basic Auth.
 - Los pasos de reporte de tests/despliegue requieren configurar secretos de OpenObserve en GitHub. El workflow de deploy requiere además SSH key, host verificado, usuario EC2 y directorio de despliegue.
@@ -87,13 +87,15 @@ La carpeta `compra-juegos` contiene la aplicación Angular CLI 20.3.16 y un back
 - Backend y pytest: terminados. Suite actual: `20 passed`; `backend/tests/test_endpoint_coverage.py` cubre las 15 operaciones HTTP de la API, incluyendo permisos, errores, filtros, persistencia, inventario y compras.
 - Tienda Angular y build de producción: terminados.
 - Pruebas end-to-end con Playwright Python: `1,700` casos funcionales y cinco recorridos completos pasaron localmente. La matriz cubre navegación, carrito, autenticación, formularios CRUD y filtros; no concentra los casos en combinaciones repetidas de búsquedas. El build de Angular pasa; su bundle inicial (619.46 kB) supera el presupuesto de advertencia de 500 kB.
-- Dockerfiles Alpine, Compose y configuración OTLP/hostmetrics para OpenObserve: escritos. Los archivos Compose pasan validación y la pila `compose.e2e.yaml` se construyó y arrancó localmente; API healthy y UI E2E completa aprobada en contenedores. El stack E2E temporal se apagó tras validar. Falta iniciar/validar el Compose de producción con OpenObserve y, después, EC2.
-- Pipeline: implementado en archivos, falta validarlo en GitHub Actions después de subir el proyecto.
-- Hostmetrics incluye CPU, RAM, red y temperatura; CPU y memoria en porcentaje están habilitados explícitamente. Las métricas se exportan al stream `default`. La temperatura depende de sensores Linux `sysfs/hwmon`, que podrían no estar expuestos por el tipo de EC2.
-- Se agregó `observability/dashboard-and-alerts.md` con consultas iniciales PromQL/SQL y pasos de UI para crear dashboard y alerta. El mapeo exacto OTLP a labels/stream se debe confirmar en Metrics Explorer de la instancia. El dashboard/alerta aún no se crearon ni comprobaron en una instancia OpenObserve activa.
+- Dockerfiles Alpine, Compose y configuración OTLP/hostmetrics para OpenObserve: desplegados en EC2. Los archivos Compose pasan validación y la pila E2E se construyó y arrancó localmente; API healthy y UI E2E completa aprobada en contenedores.
+- Pipeline: validado en GitHub Actions y desplegado en EC2. La última ejecución exitosa conocida fue `45123193517`; transmitió eventos de pruebas y despliegue a OpenObserve.
+- Hostmetrics reporta CPU, RAM y red al stream `default`. Esta EC2 no expone sensores térmicos en `sysfs/hwmon`, por lo que se retiró el scraper de temperatura; no hay una medición real en °C disponible.
+- El dashboard `Operación CompraJuegos` existe en OpenObserve y sus paneles de CPU, RAM y red muestran datos. `observability/dashboard-and-alerts.md` documenta las consultas y el estado de alertas. No hay alerta guardada todavía: OpenObserve requiere un destino de notificación.
 - Se generó `REPORTE_PROYECTO_COMPRA_JUEGOS.docx` con portada institucional editable, arquitectura, funcionalidades, pruebas, CI/CD, observabilidad, riesgos y referencias. Falta completar campos entre corchetes, agregar capturas reales y completar URLs después del despliegue.
-- No se ha desplegado a EC2; se necesitan credenciales/secretos AWS y acceso a un repositorio GitHub para validar la conexión real.
-- Última verificación local: backend `20 passed`; Angular build exitoso con advertencia no bloqueante del bundle (619.46 kB frente al presupuesto de 500 kB); Docker E2E `5 + 1,700 passed`. No se hizo deploy a EC2. El remoto GitHub indicado está vacío, pero la cuenta CLI conectada solo tiene permiso READ, así que todavía no se puede inicializar/subir el repositorio. Tampoco se verificaron los secrets de Actions: la consulta devolvió HTTP 403 por falta de permisos. El reporte detallado está en `runtime-validation-report.md`.
+- Última verificación: backend `20 passed` con pytest en modo verbose; Compose pasa `docker compose config --quiet` y `git diff --check`. La validación E2E anterior fue `5 + 1,700 passed`. El reporte está en `runtime-validation-report.md`.
+- Cambios locales pendientes de publicar: configuración opcional SMTP para Gmail en `compose.yaml`, variables de ejemplo sin secretos en `.env.example`, y comprobaciones del Collector en el pipeline. El workflow y los comandos de README ahora usan `pytest -v` para mostrar los nombres de las pruebas, no solo puntos.
+- El estudiante confirmó que añadió la configuración SMTP y la contraseña de aplicación directamente a `/opt/compra-juegos/.env` en EC2; la credencial no está en el repositorio ni se compartió por chat. El Compose actualizado todavía no está activo en EC2 porque falta publicar estos cambios en `main`.
+- El estudiante autorizó publicar y desplegar los cambios una vez actualizado el formato de salida de pruebas. Después de un pipeline exitoso, falta crear/probar el destino Email en OpenObserve y guardar una alerta de CPU.
 
 ## Diferencias y puntos por confirmar
 

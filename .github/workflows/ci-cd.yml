@@ -50,7 +50,7 @@ jobs:
       - name: Pruebas pytest del backend
         id: backend_tests
         working-directory: backend
-        run: python -m pytest -q tests --junitxml=../test-results/backend.xml
+        run: python -m pytest -v tests --junitxml=../test-results/backend.xml
 
       - name: Build de Angular
         id: frontend_build
@@ -92,8 +92,8 @@ jobs:
           E2E_ADMIN_EMAIL: admin@example.com
           E2E_ADMIN_PASSWORD: e2e-only-admin-password
         run: |
-          python -m pytest -q -s e2e/test_store.py --junitxml=test-results/playwright-store.xml
-          python -m pytest -q -s -n 4 e2e/test_ui_matrix.py --junitxml=test-results/playwright-matrix.xml
+          python -m pytest -v -s e2e/test_store.py --junitxml=test-results/playwright-store.xml
+          python -m pytest -v -s -n 4 e2e/test_ui_matrix.py --junitxml=test-results/playwright-matrix.xml
 
       - name: Detener entorno de pruebas
         id: test_stack_cleanup
@@ -212,6 +212,24 @@ jobs:
           if ! "${compose[@]}" up -d --no-build --remove-orphans; then
             if ! "${compose[@]}" logs; then
               echo "No se pudieron leer los logs de Compose." >&2
+            fi
+            restore_legacy
+            exit 1
+          fi
+          collector_running=false
+          for attempt in $(seq 1 10); do
+            collector_id=$("${compose[@]}" ps -q otel-collector)
+            if [ -n "$collector_id" ] &&
+              [ "$(docker inspect -f '{{.State.Running}}' "$collector_id")" = true ] &&
+              [ "$(docker inspect -f '{{.RestartCount}}' "$collector_id")" -eq 0 ]; then
+              collector_running=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$collector_running" != true ]; then
+            if ! "${compose[@]}" logs otel-collector; then
+              echo "No se pudieron leer los logs del Collector." >&2
             fi
             restore_legacy
             exit 1

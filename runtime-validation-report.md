@@ -1,22 +1,25 @@
-# Pre-deployment Runtime Validation Report
+# Runtime Validation Report
 
-**Generated**: 2026-11-22T21:19:43-06:00
+**Generated**: 2026-11-23
 **Target**: `compra-juegos`
-**Scope**: Local API, production build, and Docker E2E validation before GitHub/EC2 publication
+**Scope**: Local test baseline and deployed EC2/OpenObserve validation
 
 ## Summary
 
 | Step | Status | Exit code | Details |
 |---|---|---:|---|
-| Startup/readiness | PASS | 0 | Docker Compose E2E stack started; API `/api/health` returned HTTP 200 and `{"status":"ok"}`. |
+| Startup/readiness | PASS | 0 | Local Compose API and deployed `https://tienda-videojuegos.duckdns.org/api/health` returned HTTP 200. |
 | Backend/API tests | PASS | 0 | 20 pytest tests passed with FastAPI TestClient and in-memory SQLite. |
 | Angular production build | PASS | 0 | `npm run build` succeeded; initial bundle is 619.46 kB, above the 500 kB warning budget. |
 | Playwright user journeys in Docker | PASS | 0 | Five complete journeys passed in 26.24 seconds. |
 | Playwright functional matrix in Docker | PASS | 0 | 1,700 cases passed in 478.43 seconds with four workers. |
-| Docker production/OpenObserve | NOT RUN | n/a | Compose syntax validated, but the production stack was not started. |
-| GitHub/EC2 publication | BLOCKED | n/a | The remote is empty; connected GitHub account has read-only permission. EC2/OpenObserve Actions secrets cannot be inspected due GitHub API HTTP 403. |
+| Production API | PASS | 0 | Deployed `/api/health` and `/api/games` returned HTTP 200. |
+| OpenTelemetry ingestion | PASS | 0 | OpenObserve accepted Collector posts for metrics, logs, and traces with HTTP 200; Collector was running with zero restarts. |
+| Resource dashboard | PASS | 0 | `Operación CompraJuegos` is saved and shows CPU, RAM, and network metrics. |
+| Operational alert | NEEDS_SIGNOFF | n/a | OpenObserve requires a configured notification destination or workflow; this stack has no SMTP destination. |
+| Temperature | UNAVAILABLE | n/a | EC2 exposes no thermal sensors; real °C cannot be reported by this instance. |
 
-**Overall**: NEEDS_SIGNOFF — local backend, build, and Docker E2E validation passed. GitHub publication, production OpenObserve stack, and EC2 runtime remain unverified.
+**Overall**: NEEDS_SIGNOFF — local tests, production telemetry, and dashboard are verified; alert delivery requires a real notification destination, and EC2 cannot provide temperature sensors.
 
 ## Environment
 
@@ -24,9 +27,9 @@
 - Python: available, `3.10.11`.
 - Playwright: available, `1.65.2`; Chromium ran the browser suite.
 - Docker CLI and daemon: available, Docker `29.9.3`.
-- GitHub CLI: authenticated as `vic0192`; repository viewer permission is `READ`.
-- Target repository: `https://github.com/vicrguez172-glitch/integradordevops2da`, public and empty (no default branch).
-- Querying Actions secrets/variables returned HTTP 403 because the connected account lacks permission.
+- The last successful GitHub Actions deployment was run `45123193517`; its CI/CD test and deployment events were accepted by OpenObserve with HTTP 200.
+- Production domains: `tienda-videojuegos.duckdns.org` and `obs-videojuegos.duckdns.org`.
+- EC2 has 908 MiB RAM, no swap, and approximately 333 MiB free on its 6.7 GiB root volume at the last check.
 - E2E Docker infrastructure uses its isolated SQLite volume and test-only admin credentials. No production credentials were used for this validation.
 
 ## Backend/API Coverage
@@ -105,16 +108,18 @@ environment:
   playwright: AVAILABLE — Playwright 1.65.2 with Chromium
   infra-tier: PRIMARY(Docker-based) — Compose E2E stack built and tested
   browser-tier: PRIMARY(Playwright) — 1,705 tests passed
-startup: PASS — Docker API health returned HTTP 200
+startup: PASS — local API and deployed `/api/health` returned HTTP 200
 integration: PASS — exit_code: 0, passed: 20, failed: 0, skipped: 0; all 15 API operations
 e2e: PASS — exit_code: 0, passed: 1,705, failed: 0; browser journeys and functional matrix
-overall: NEEDS_SIGNOFF — GitHub publication/EC2 blocked by missing repository write permission; production telemetry not tested
+telemetry: PASS — metrics, logs, and traces accepted by OpenObserve with HTTP 200; Collector restarts: 0
+dashboard: PASS — Operación CompraJuegos saved; CPU, RAM, and network data visible
+alert: NEEDS_SIGNOFF — no SMTP or webhook destination is configured
+temperature: UNAVAILABLE — EC2 exposes no thermal sensor
+overall: NEEDS_SIGNOFF — alert delivery requires a real destination; temperature is unavailable on this EC2
 ```
 
-## Blockers / Next Steps
+## Remaining gaps
 
-- Grant write access to the authenticated GitHub account or authenticate GitHub CLI as an account with repository write access. The current account sees only `READ`, so a push cannot be made.
-- Configure and verify in GitHub Actions the `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `EC2_KNOWN_HOSTS`, `OPENOBSERVE_URL`, `OPENOBSERVE_EMAIL`, and `OPENOBSERVE_PASSWORD` secrets. Never paste these values in chat or commit them.
-- Set up any optional Actions variables (`OPENOBSERVE_ORG`, `OPENOBSERVE_STREAM`, `EC2_APP_DIR`) if needed.
-- Start the production Compose stack with secure credentials only after checking `.env` values locally, then confirm logs, traces, endpoint metrics, host CPU/RAM/network data, and available temperature sensors in OpenObserve.
-- Deploy to EC2 only after repository write access and required Actions secrets are available.
+- Configure a real webhook destination or SMTP before creating the scheduled CPU alert. Never commit notification URLs, tokens, or credentials.
+- Temperature in °C cannot be validated on this EC2 because the host does not expose a thermal sensor; use hardware that exposes sensors if this is mandatory.
+- Monitor the EC2 disk and memory headroom before further deployments; do not remove legacy containers/images or data volumes without deciding whether rollback data is needed.

@@ -19,7 +19,6 @@ receivers:
           system.memory.limit:
             enabled: true
       network: {}
-      hardware: {}
 
 processors:
   batch:
@@ -36,7 +35,7 @@ exporters:
     endpoint: http://openobserve:5080/api/default
     logs_endpoint: http://openobserve:5080/api/default/v1/logs
     traces_endpoint: http://openobserve:5080/api/default/v1/traces
-    metrics_endpoint: http://openobserve:5080/api/default/v1/metrics_json
+    metrics_endpoint: http://openobserve:5080/api/default/v1/metrics
     headers:
       Authorization: "Basic ${env:OO_BASIC_AUTH}"
       stream-name: default
