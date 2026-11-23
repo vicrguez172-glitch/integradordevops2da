@@ -1,0 +1,160 @@
+import json
+import os
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from scripts.report_pipeline import build_junit_events, send_events
+
+
+class JUnitEventTests(unittest.TestCase):
+    def test_builds_case_and_http_events_from_junit(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            report_path = Path(temporary_directory) / "playwright.xml"
+            root = ET.Element("testsuites")
+            suite = ET.SubElement(root, "testsuite", name="e2e.test_store")
+            passed = ET.SubElement(
+                suite,
+                "testcase",
+                classname="e2e.test_store",
+                name="test_customer_purchase",
+                time="0.125",
+            )
+            properties = ET.SubElement(passed, "properties")
+            ET.SubElement(
+                properties,
+                "property",
+                name="http_request_metrics",
+                value=json.dumps(
+                    [
+                        {
+                            "timestamp": "2026-11-23T08:00:00+00:00",
+                            "endpoint": "/api/purchases",
+                            "method": "POST",
+                            "status_code": 201,
+                            "response_time_ms": 24.5,
+                        }
+                    ]
+                ),
+            )
+            failed = ET.SubElement(
+                suite,
+                "testcase",
+                classname="backend.test_users",
+                name="test_invalid_update",
+                time="0.03",
+            )
+            ET.SubElement(failed, "failure", message="assertion failed")
+            skipped = ET.SubElement(
+                suite,
+                "testcase",
+                classname="backend.test_users",
+                name="test_optional_feature",
+                time="0",
+            )
+            ET.SubElement(skipped, "skipped")
+            ET.ElementTree(root).write(report_path, encoding="utf-8", xml_declaration=True)
+
+            events = build_junit_events(Path(temporary_directory))
+
+        test_events = [event for event in events if event["event_type"] == "test_case"]
+        request_events = [event for event in events if event["event_type"] == "test_http_request"]
+        self.assertEqual([event["status"] for event in test_events], ["passed", "failed", "skipped"])
+        self.assertEqual(test_events[0]["test_name"], "test_customer_purchase")
+        self.assertEqual(test_events[0]["duration_ms"], 125.0)
+        self.assertEqual(len(request_events), 1)
+        self.assertEqual(request_events[0]["endpoint"], "/api/purchases")
+        self.assertEqual(request_events[0]["method"], "POST")
+        self.assertEqual(request_events[0]["status_code"], 201)
+        self.assertEqual(request_events[0]["response_time_ms"], 24.5)
+        self.assertEqual(request_events[0]["timestamp"], "2026-11-23T08:00:00+00:00")
+
+    def test_reports_all_expected_backend_and_browser_cases(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            for filename, suite_name, test_count in (
+                ("backend.xml", "backend.tests", 20),
+                ("playwright.xml", "e2e.test_ui_matrix", 1705),
+            ):
+                root = ET.Element("testsuites")
+                suite = ET.SubElement(root, "testsuite", name=suite_name)
+                for index in range(test_count):
+                    ET.SubElement(
+                        suite,
+                        "testcase",
+                        classname=suite_name,
+                        name=f"test_case_{index}",
+                        time="0.001",
+                    )
+                report_path = Path(temporary_directory) / filename
+                ET.ElementTree(root).write(report_path, encoding="utf-8", xml_declaration=True)
+
+            events = build_junit_events(Path(temporary_directory))
+
+        self.assertEqual(len(events), 1725)
+        self.assertEqual(events[0]["test_suite"], "backend.tests")
+        self.assertEqual(events[0]["test_name"], "test_case_0")
+        self.assertEqual(events[-1]["test_suite"], "e2e.test_ui_matrix")
+        self.assertEqual(events[-1]["test_name"], "test_case_1704")
+
+    def test_rejects_malformed_http_metrics(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            report_path = Path(temporary_directory) / "invalid.xml"
+            root = ET.Element("testsuites")
+            suite = ET.SubElement(root, "testsuite", name="e2e.test_store")
+            testcase = ET.SubElement(
+                suite,
+                "testcase",
+                classname="e2e.test_store",
+                name="test_bad_metrics",
+                time="0",
+            )
+            properties = ET.SubElement(testcase, "properties")
+            ET.SubElement(
+                properties,
+                "property",
+                name="http_request_metrics",
+                value="{not-json}",
+            )
+            ET.ElementTree(root).write(report_path, encoding="utf-8", xml_declaration=True)
+
+            with self.assertRaisesRegex(RuntimeError, "Invalid HTTP request metrics"):
+                build_junit_events(Path(temporary_directory))
+
+
+class EventBatchTests(unittest.TestCase):
+    def test_sends_all_test_events_in_bounded_batches(self):
+        response = MagicMock()
+        response.status = 200
+        environment = {
+            "OPENOBSERVE_URL": "https://observe.example.test",
+            "OPENOBSERVE_EMAIL": "test@example.test",
+            "OPENOBSERVE_PASSWORD": "test-password",
+            "OPENOBSERVE_ORG": "default",
+            "OPENOBSERVE_STREAM": "ci_cd",
+        }
+        with patch.dict(os.environ, environment), patch(
+            "scripts.report_pipeline.urlopen"
+        ) as mocked_urlopen:
+            mocked_urlopen.return_value.__enter__.return_value = response
+            send_events([{"event_type": "test_case", "test_name": str(index)} for index in range(1725)])
+
+        self.assertEqual(mocked_urlopen.call_count, 9)
+        first_request = mocked_urlopen.call_args_list[0].args[0]
+        final_request = mocked_urlopen.call_args_list[-1].args[0]
+        payload_sizes = [
+            len(json.loads(call.args[0].data))
+            for call in mocked_urlopen.call_args_list
+        ]
+        self.assertEqual(payload_sizes, [200] * 8 + [125])
+        self.assertEqual(
+            first_request.full_url,
+            "https://observe.example.test/api/default/ci_cd/_json",
+        )
+        self.assertEqual(len(json.loads(first_request.data)), 200)
+        self.assertEqual(len(json.loads(final_request.data)), 125)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -14,6 +14,7 @@ jobs:
     name: Pruebas y build
     runs-on: ubuntu-latest
     outputs:
+      reporter_tests: ${{ steps.reporter_tests.outcome }}
       backend_tests: ${{ steps.backend_tests.outcome }}
       frontend_build: ${{ steps.frontend_build.outcome }}
       test_stack: ${{ steps.test_stack.outcome }}
@@ -33,6 +34,10 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             e2e/requirements.txt
+
+      - name: Probar el reportero de OpenObserve
+        id: reporter_tests
+        run: python -m unittest scripts.test_report_pipeline
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -288,23 +293,6 @@ jobs:
           if [ "$failed" = true ]; then exit 1; fi
           REMOTE
 
-      - name: Registrar resultado de pruebas en OpenObserve
-        if: always()
-        env:
-          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
-          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
-          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
-          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
-          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
-        run: |
-          python scripts/report_pipeline.py \
-            --event test_run \
-            --outcome "${{ needs.tests.outputs.backend_tests }}" \
-            --outcome "${{ needs.tests.outputs.frontend_build }}" \
-            --outcome "${{ needs.tests.outputs.test_stack }}" \
-            --outcome "${{ needs.tests.outputs.playwright_tests }}" \
-            --outcome "${{ needs.tests.outputs.test_stack_cleanup }}"
-
       - name: Registrar despliegue en OpenObserve
         if: always()
         env:
@@ -319,16 +307,24 @@ jobs:
             --outcome "${{ needs.tests.result }}" \
             --outcome "${{ steps.deployment.outcome }}"
 
-  report-failed-tests:
-    name: Registrar pruebas fallidas en OpenObserve
+  report-test-results:
+    name: Registrar resultados individuales de pruebas en OpenObserve
     needs: tests
-    if: github.event_name != 'pull_request' && needs.tests.result == 'failure'
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
 
-      - name: Registrar resultado de pruebas
+      - name: Descargar reportes JUnit
+        uses: actions/download-artifact@v4
+        with:
+          name: resultados-pruebas
+          path: test-results
+        continue-on-error: ${{ needs.tests.result != 'success' }}
+
+      - name: Registrar resumen y resultados individuales
+        if: always()
         env:
           OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
           OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
@@ -338,4 +334,10 @@ jobs:
         run: |
           python scripts/report_pipeline.py \
             --event test_run \
-            --outcome "${{ needs.tests.result }}"
+            --outcome "${{ needs.tests.outputs.reporter_tests }}" \
+            --outcome "${{ needs.tests.outputs.backend_tests }}" \
+            --outcome "${{ needs.tests.outputs.frontend_build }}" \
+            --outcome "${{ needs.tests.outputs.test_stack }}" \
+            --outcome "${{ needs.tests.outputs.playwright_tests }}" \
+            --outcome "${{ needs.tests.outputs.test_stack_cleanup }}" \
+            --junit-dir test-results
