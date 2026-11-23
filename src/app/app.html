@@ -1,0 +1,365 @@
+<div class="app-shell">
+  <header class="site-header navbar bg-body border-bottom sticky-top px-3 px-lg-5">
+    <a class="brand navbar-brand fw-bold" href="#" (click)="view.set('store'); $event.preventDefault()" aria-label="Nivel, inicio">
+      <span class="brand-mark badge text-bg-primary rounded-circle">N</span>
+      <span>NIVEL<span class="brand-period">.</span></span>
+    </a>
+    <nav class="main-nav navbar-nav me-auto ms-lg-4 d-none d-lg-flex" aria-label="Navegación principal">
+      <button class="nav-link" [class.active]="view() === 'store'" (click)="view.set('store')">Descubrir</button>
+      @if (user()) {
+        <button class="nav-link" [class.active]="view() === 'account'" (click)="openAccount()">Mis compras</button>
+        @if (user()?.role === 'admin') {
+          <button class="nav-link" [class.active]="view() === 'admin'" (click)="openAdmin()">Administrar</button>
+        }
+      }
+    </nav>
+    <div class="header-actions d-flex align-items-center gap-2">
+      <button class="icon-button cart-button btn btn-outline-secondary btn-sm" aria-label="Abrir carrito" (click)="openCart()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.2 11.1a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 1.9-1.4L21 8H6"/><circle cx="10" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg>
+        <span>Carrito</span><b class="cart-count badge text-bg-primary">{{ cartCount() }}</b>
+      </button>
+      @if (user(); as currentUser) {
+        <button class="profile-button btn btn-outline-light btn-sm" (click)="openAccount()" aria-label="Abrir mi cuenta">
+          <span class="avatar">{{ currentUser.full_name.charAt(0).toUpperCase() }}</span>
+          <span class="profile-name">{{ currentUser.full_name.split(' ')[0] }}</span>
+        </button>
+        <button class="logout-button btn btn-outline-danger btn-sm" (click)="logout()" aria-label="Cerrar sesión">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3m9-7V4a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2v-1"/></svg>
+          <span>Salir</span>
+        </button>
+      } @else {
+        <button class="button button-outline header-login btn btn-primary btn-sm" (click)="openAuth()">Entrar</button>
+      }
+    </div>
+  </header>
+
+  <main>
+    @if (view() === 'store') {
+      <section class="hero container py-5">
+        <div class="row align-items-center g-4">
+          <div class="hero-copy col-lg-6" appScrollReveal>
+          <span class="eyebrow"><span class="eyebrow-dot"></span> TU PRÓXIMA AVENTURA EMPIEZA AQUÍ</span>
+          <h1>Juega a tu<br /><span class="text-primary">siguiente nivel.</span></h1>
+          <p>Encuentra ese juego que no sabías que necesitabas. Grandes historias, mejores precios y diversión sin pausa.</p>
+          <button class="button button-primary hero-cta btn btn-primary" (click)="scrollTo('catalogo')">
+            Explorar catálogo <span aria-hidden="true">↗</span>
+          </button>
+          <div class="hero-proof mt-4 text-secondary small"><span class="proof-stars text-warning me-2">★★★★★</span><span>Tu próxima partida favorita está aquí</span></div>
+        </div>
+        <div class="hero-art col-lg-6 position-relative" aria-label="Control de videojuegos y luces de neón" appScrollReveal>
+          <div class="hero-glow"></div>
+          <div class="hero-art-label badge text-bg-dark"><span class="live-dot"></span> NUEVOS LANZAMIENTOS</div>
+          <img class="img-fluid rounded shadow-sm" src="https://images.unsplash.com/photo-1593305841991-05c297ba4575?auto=format&fit=crop&w=1200&q=85" alt="Control de videojuegos sobre un fondo oscuro" />
+          <div class="hero-sticker badge text-bg-warning rounded-circle p-3"><span>LEVEL</span><b>UP!</b><i>▶</i></div>
+        </div>
+      </div>
+        <div class="hero-index d-flex align-items-center gap-2 text-secondary small mt-3"><span class="text-primary fw-semibold">01</span><span class="index-line"></span><span>04</span></div>
+      </section>
+
+      <section class="benefits container row row-cols-1 row-cols-md-3 g-3 py-4" aria-label="Ventajas de comprar en Nivel">
+        <div class="col" appScrollReveal><span class="benefit-icon">✦</span><span><b>Juegos para cada estilo</b><small>Acción, aventura y mucho más</small></span></div>
+        <div class="col" appScrollReveal><span class="benefit-icon">⌁</span><span><b>Compra fácil y segura</b><small>Tu pedido, siempre a la mano</small></span></div>
+        <div class="col" appScrollReveal><span class="benefit-icon">◈</span><span><b>Tu siguiente partida</b><small>El inventario se actualiza al instante</small></span></div>
+      </section>
+
+      <section class="catalog-section container py-5" id="catalogo">
+        <div class="section-heading row align-items-end g-3">
+          <div class="col-lg-8" appScrollReveal><span class="eyebrow">SELECCIÓN NIVEL</span><h2>Encuentra tu juego</h2><p>Elige tu plataforma. Nosotros ponemos la aventura.</p></div>
+          <label class="search-box col-lg-4">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+            <input class="form-control" aria-label="Buscar juegos" placeholder="Busca un juego..." [ngModel]="searchText()" (ngModelChange)="searchText.set($event)" />
+          </label>
+        </div>
+        <div class="filter-row d-flex flex-wrap align-items-center gap-2 my-4" aria-label="Filtrar por categoría" appScrollReveal>
+          @for (category of categories(); track category) {
+            <button class="filter-chip btn btn-sm" [class.btn-primary]="selectedCategory() === category" [class.btn-outline-secondary]="selectedCategory() !== category" (click)="selectedCategory.set(category)">{{ category }}</button>
+          }
+          <span class="results-count">{{ filteredGames().length }} juegos</span>
+        </div>
+
+        <div class="game-grid row row-cols-1 row-cols-sm-2 row-cols-lg-4 g-4">
+          @for (game of filteredGames(); track game.id) {
+            <article class="game-card col" appScrollReveal>
+              <div class="card h-100">
+              <div class="game-cover position-relative">
+                <img class="card-img-top" [src]="game.image_url" [alt]="'Portada de ' + game.title" loading="lazy" />
+                <span class="game-category badge text-bg-light">{{ game.category }}</span>
+                @if (game.stock < 5) { <span class="stock-tag badge text-bg-warning">¡Últimas piezas!</span> }
+                <button class="quick-add btn btn-primary btn-sm" [attr.aria-label]="'Agregar ' + game.title + ' al carrito'" (click)="addToCart(game)">+</button>
+              </div>
+              <div class="game-info card-body d-flex flex-column">
+                <div class="game-platform">{{ game.platform }}</div>
+                <h3>{{ game.title }}</h3>
+                <p>{{ game.description }}</p>
+                <div class="game-buy-row d-flex align-items-center justify-content-between mt-auto pt-3"><strong>{{ game.price | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</strong><button class="button button-small btn btn-outline-primary btn-sm" [disabled]="game.stock < 1" (click)="addToCart(game)">{{ game.stock ? 'Agregar' : 'Agotado' }}</button></div>
+              </div>
+              </div>
+            </article>
+          } @empty {
+            <div class="empty-state empty-state-panel col-12 text-center"><span>⌕</span><h3>No encontramos ese juego</h3><p>Prueba con otro nombre o categoría.</p></div>
+          }
+        </div>
+      </section>
+    }
+
+    @if (view() === 'cart') {
+      <section class="page-section container py-5">
+        <button class="back-link btn btn-link link-secondary text-decoration-none p-0 mb-4" (click)="view.set('store')">← Seguir explorando</button>
+        <div class="page-title mb-4" appScrollReveal><span class="eyebrow text-primary">TU SELECCIÓN</span><h1>Tu carrito</h1><p>Una buena partida está a unos clics de distancia.</p></div>
+        @if (cart().length) {
+          <div class="cart-layout" appScrollReveal>
+            <div class="cart-items">
+              @for (line of cart(); track line.game.id) {
+                <article class="cart-line">
+                  <img [src]="line.game.image_url" [alt]="line.game.title" />
+                  <div class="cart-line-info"><span>{{ line.game.platform }}</span><h3>{{ line.game.title }}</h3><b>{{ line.game.price | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</b></div>
+                  <div class="quantity-control"><button class="btn btn-outline-secondary btn-sm" [attr.aria-label]="'Quitar uno de ' + line.game.title" (click)="changeQuantity(line.game.id, -1)">−</button><span>{{ line.quantity }}</span><button class="btn btn-outline-secondary btn-sm" [attr.aria-label]="'Agregar uno de ' + line.game.title" [disabled]="line.quantity >= line.game.stock" (click)="changeQuantity(line.game.id, 1)">+</button></div>
+                  <button class="remove-button btn btn-outline-danger btn-sm" [attr.aria-label]="'Eliminar ' + line.game.title" (click)="removeFromCart(line.game.id)">×</button>
+                </article>
+              }
+            </div>
+            <aside class="order-summary"><span class="eyebrow text-primary">RESUMEN</span><h2>Tu pedido</h2><div class="summary-row"><span>Productos ({{ cartCount() }})</span><b>{{ cartTotal() | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</b></div><div class="summary-row"><span>Envío digital</span><b class="free-label text-success">GRATIS</b></div><div class="summary-total"><span>Total</span><strong>{{ cartTotal() | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</strong></div><button class="button button-primary checkout-button btn btn-primary w-100" (click)="beginCheckout()">Continuar con la compra <span>→</span></button><small>El pago de esta versión es una simulación académica; no se realiza ningún cargo.</small></aside>
+          </div>
+        } @else {
+          <div class="empty-state cart-empty empty-state-panel text-center"><span>▱</span><h2>Tu carrito está esperando</h2><p>Aún no agregas juegos. Tu siguiente aventura puede empezar ahora.</p><button class="button button-primary btn btn-primary" (click)="view.set('store')">Ver catálogo</button></div>
+        }
+      </section>
+    }
+
+    @if (view() === 'account') {
+      <section class="page-section container py-5">
+        <button class="back-link btn btn-link link-secondary text-decoration-none p-0 mb-4" (click)="view.set('store')">← Volver a la tienda</button>
+        <div class="page-title" appScrollReveal><span class="eyebrow">TU ESPACIO NIVEL</span><h1>Hola, {{ user()?.full_name }}</h1><p>Estos son los pedidos que has realizado.</p></div>
+        @if (purchases().length) {
+          <div class="purchase-list">
+            @for (purchase of purchases(); track purchase.id) {
+              <article class="purchase-card" appScrollReveal><div class="purchase-header"><div><span class="eyebrow text-primary">PEDIDO #{{ purchase.id }}</span><p>{{ purchase.created_at | date:'medium':'':'es-MX' }}</p></div><b>{{ purchase.total | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</b></div><div class="purchase-products">@for (item of purchase.items; track item.game_id) { <span class="badge text-bg-secondary">{{ item.quantity }} × {{ item.game_title }}</span> }</div><span class="order-status badge text-bg-success">● {{ purchase.status === 'confirmed' ? 'Confirmado' : purchase.status }}</span></article>
+            }
+          </div>
+        } @else {
+          <div class="empty-state empty-state-panel text-center"><span>◷</span><h2>Aún no tienes pedidos</h2><p>Cuando hagas tu primera compra, podrás verla aquí.</p><button class="button button-primary btn btn-primary" (click)="view.set('store')">Descubrir juegos</button></div>
+        }
+      </section>
+    }
+
+    @if (view() === 'admin' && user()?.role === 'admin') {
+      <section class="page-section container py-5 admin-section">
+        <button class="back-link btn btn-link link-secondary text-decoration-none p-0 mb-4" (click)="view.set('store')">← Volver a la tienda</button>
+        <div class="page-title" appScrollReveal><span class="eyebrow">PANEL DE CONTROL</span><h1>Administración</h1><p>Gestiona las cuentas y el inventario de Nivel.</p></div>
+        <div class="admin-tabs d-flex gap-2 mb-3"><button class="filter-chip btn btn-primary btn-sm" (click)="scrollTo('usuarios')">Usuarios <span>{{ users().length }}</span></button><button class="filter-chip btn btn-outline-secondary btn-sm" (click)="scrollTo('inventario')">Inventario <span>{{ games().length }}</span></button></div>
+        <section class="admin-panel card shadow-sm mb-3" id="usuarios" appScrollReveal>
+          <div class="admin-panel-heading"><div><h2>Usuarios</h2><p>Administra el acceso y los roles de las cuentas.</p></div></div>
+          <form class="admin-create-form" (ngSubmit)="createUser()">
+            <label>Nombre completo<input class="form-control" name="userName" [(ngModel)]="userForm.full_name" required minlength="2" maxlength="120" placeholder="Nombre del usuario" /></label>
+            <label>Correo electrónico<input class="form-control" name="userEmail" [(ngModel)]="userForm.email" type="email" required placeholder="correo@ejemplo.com" /></label>
+            <div class="password-form-field">
+              <label for="user-password">Contraseña inicial</label>
+              <div class="password-field" [class.password-visible]="isPasswordVisible('newUser')">
+                <input class="form-control" id="user-password" name="userPassword" [(ngModel)]="userForm.password" [type]="isPasswordVisible('newUser') ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" />
+                <button class="password-toggle btn btn-link btn-sm" type="button" [attr.aria-label]="isPasswordVisible('newUser') ? 'Ocultar contraseña' : 'Mostrar contraseña'" [attr.aria-pressed]="isPasswordVisible('newUser')" (click)="togglePasswordVisibility('newUser')">{{ isPasswordVisible('newUser') ? 'Ocultar' : 'Mostrar' }}</button>
+              </div>
+              <small class="password-help">Mínimo 8 caracteres.</small>
+            </div>
+            <label>Rol<select class="form-select" name="userRole" [(ngModel)]="userForm.role"><option value="customer">Cliente</option><option value="admin">Admin</option></select></label>
+            <button class="button button-primary btn btn-primary" type="submit">+ Crear usuario</button>
+          </form>
+          <div class="admin-filters mb-3">
+            <label>Buscar usuario<input class="form-control" aria-label="Buscar usuario" name="userSearch" [ngModel]="userSearch()" (ngModelChange)="userSearch.set($event)" placeholder="Nombre o correo" /></label>
+            <label>Filtrar por rol<select class="form-select" aria-label="Filtrar usuarios por rol" name="userRoleFilter" [ngModel]="userRoleFilter()" (ngModelChange)="userRoleFilter.set($event)"><option value="all">Todos los roles</option><option value="customer">Clientes</option><option value="admin">Administradores</option></select></label>
+            <label>Filtrar por estado<select class="form-select" aria-label="Filtrar usuarios por estado" name="userStatusFilter" [ngModel]="userStatusFilter()" (ngModelChange)="userStatusFilter.set($event)"><option value="all">Todos los estados</option><option value="active">Activos</option><option value="inactive">Dados de baja</option></select></label>
+            <span class="results-count align-self-end">{{ filteredUsers().length }} de {{ users().length }} usuarios</span>
+          </div>
+          <div class="table-wrap"><table class="table table-hover align-middle"><thead><tr><th>Usuario</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Registro</th><th>Acciones</th></tr></thead><tbody>
+            @for (adminUser of filteredUsers(); track adminUser.id) {
+              <tr>
+                @if (editingUserId() === adminUser.id) {
+                  <td colspan="6">
+                    <form class="user-edit-form" (ngSubmit)="saveUserEdit(adminUser.id)">
+                      <label>Nombre completo<input class="form-control form-control-sm" aria-label="Nombre del usuario" name="editName" [(ngModel)]="userEditForm.full_name" required minlength="2" maxlength="120" /></label>
+                      <label>Correo electrónico<input class="form-control form-control-sm" aria-label="Correo del usuario" name="editEmail" [(ngModel)]="userEditForm.email" type="email" required /></label>
+                      <label>Rol<select class="form-select form-select-sm" aria-label="Rol del usuario" name="editRole" [(ngModel)]="userEditForm.role"><option value="customer">Cliente</option><option value="admin">Admin</option></select></label>
+                      <div class="password-form-field">
+                        <label for="edit-password">Nueva contraseña (opcional)</label>
+                        <div class="password-field" [class.password-visible]="isPasswordVisible('editUser')">
+                          <input class="form-control form-control-sm" id="edit-password" aria-label="Nueva contraseña" name="editPassword" [(ngModel)]="userEditForm.password" [type]="isPasswordVisible('editUser') ? 'text' : 'password'" minlength="8" maxlength="128" autocomplete="new-password" placeholder="Dejar vacía para conservarla" />
+                          <button class="password-toggle btn btn-link btn-sm" type="button" [attr.aria-label]="isPasswordVisible('editUser') ? 'Ocultar contraseña' : 'Mostrar contraseña'" [attr.aria-pressed]="isPasswordVisible('editUser')" (click)="togglePasswordVisibility('editUser')">{{ isPasswordVisible('editUser') ? 'Ocultar' : 'Mostrar' }}</button>
+                        </div>
+                        <small class="password-help">Si la cambias, usa al menos 8 caracteres.</small>
+                      </div>
+                      <div class="user-edit-actions"><button class="btn btn-success btn-sm" type="submit">Guardar cambios</button><button class="btn btn-outline-secondary btn-sm" type="button" (click)="editingUserId.set(null)">Cancelar</button></div>
+                    </form>
+                  </td>
+                } @else {
+                  <td><b>{{ adminUser.full_name }}</b></td>
+                  <td>{{ adminUser.email }}</td>
+                  <td><span class="role-badge badge text-bg-secondary" [class.text-bg-primary]="adminUser.role === 'admin'">{{ adminUser.role === 'admin' ? 'Admin' : 'Cliente' }}</span></td>
+                  <td><span class="badge" [class.text-bg-success]="adminUser.is_active" [class.text-bg-secondary]="!adminUser.is_active">{{ adminUser.is_active ? 'Activo' : 'Baja lógica' }}</span></td>
+                  <td>{{ adminUser.created_at | date:'shortDate':'':'es-MX' }}</td>
+                  <td class="table-actions"><button class="btn btn-outline-primary btn-sm" (click)="startUserEdit(adminUser)">Editar</button>@if (adminUser.is_active) { <button class="btn btn-outline-danger btn-sm" (click)="deleteUser(adminUser)">Dar de baja</button> } @else { <button class="btn btn-outline-success btn-sm" (click)="reactivateUser(adminUser)">Reactivar</button> }</td>
+                }
+              </tr>
+            } @empty {
+              <tr><td class="text-center text-secondary py-4" colspan="6">No hay usuarios que coincidan con los filtros.</td></tr>
+            }
+          </tbody></table></div>
+        </section>
+        <section class="admin-panel inventory-panel card shadow-sm mb-3" id="inventario" appScrollReveal>
+          <div class="admin-panel-heading"><div><h2>Inventario de juegos</h2><p>Actualiza productos, precios y existencias.</p></div><button class="button button-primary btn btn-primary" (click)="openNewGame()">+ Agregar juego</button></div>
+          @if (gameEditorOpen()) {
+            <form class="game-editor" (ngSubmit)="saveGame()">
+              <h3>{{ editingGameId() ? 'Editar juego' : 'Agregar juego' }}</h3>
+              <div class="editor-grid">
+                <label>Título<input class="form-control" name="gameTitle" [(ngModel)]="gameForm.title" required minlength="2" maxlength="120" /></label>
+                <label>Plataforma<input class="form-control" name="gamePlatform" [(ngModel)]="gameForm.platform" required minlength="2" maxlength="40" /></label>
+                <label>Categoría<input class="form-control" name="gameCategory" [(ngModel)]="gameForm.category" required minlength="2" maxlength="40" /></label>
+                <label>Precio (MXN)<input class="form-control" name="gamePrice" [(ngModel)]="gameForm.price" type="number" min="0.01" max="99999999.99" step="0.01" required /></label>
+                <label>Existencias<input class="form-control" name="gameStock" [(ngModel)]="gameForm.stock" type="number" min="0" max="10000" step="1" required /></label>
+                <label>URL de portada<input class="form-control" name="gameImage" [(ngModel)]="gameForm.image_url" type="url" maxlength="500" required /></label>
+                <label class="full-span">Descripción<textarea class="form-control" name="gameDescription" [(ngModel)]="gameForm.description" required minlength="10" maxlength="2000" rows="2"></textarea></label>
+              </div>
+              <div class="editor-actions"><button class="button button-primary btn btn-primary" type="submit">Guardar juego</button><button class="button button-outline btn btn-outline-secondary" type="button" (click)="gameEditorOpen.set(false)">Cancelar</button></div>
+            </form>
+          }
+          <div class="admin-filters mb-3">
+            <label>Buscar juego<input class="form-control" aria-label="Buscar juego en inventario" name="inventorySearch" [ngModel]="inventorySearch()" (ngModelChange)="inventorySearch.set($event)" placeholder="Nombre, plataforma o categoría" /></label>
+            <label>Filtrar por categoría<select class="form-select" aria-label="Filtrar juegos por categoría" name="inventoryCategory" [ngModel]="inventoryCategoryFilter()" (ngModelChange)="inventoryCategoryFilter.set($event)">@for (category of categories(); track category) { <option [value]="category">{{ category }}</option> }</select></label>
+            <label>Filtrar por plataforma<select class="form-select" aria-label="Filtrar juegos por plataforma" name="inventoryPlatform" [ngModel]="inventoryPlatformFilter()" (ngModelChange)="inventoryPlatformFilter.set($event)">@for (platform of inventoryPlatforms(); track platform) { <option [value]="platform">{{ platform }}</option> }</select></label>
+            <span class="results-count align-self-end">{{ filteredInventoryGames().length }} de {{ games().length }} juegos</span>
+          </div>
+          <div class="table-wrap"><table class="table table-hover align-middle"><thead><tr><th>Juego</th><th>Plataforma</th><th>Categoría</th><th>Precio</th><th>Stock</th><th>Acciones</th></tr></thead><tbody>
+            @for (game of filteredInventoryGames(); track game.id) {
+              <tr><td><div class="game-table-name"><img [src]="game.image_url" [alt]="''" /><b>{{ game.title }}</b></div></td><td>{{ game.platform }}</td><td>{{ game.category }}</td><td>{{ game.price | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</td><td>{{ game.stock }}</td><td class="table-actions"><button class="btn btn-outline-primary btn-sm" (click)="startGameEdit(game)">Editar</button><button class="btn btn-outline-danger btn-sm" (click)="deleteGame(game)">Eliminar</button></td></tr>
+            } @empty {
+              <tr><td class="text-center text-secondary py-4" colspan="6">No hay juegos que coincidan con los filtros.</td></tr>
+            }
+          </tbody></table></div>
+        </section>
+      </section>
+    }
+  </main>
+
+  <footer class="site-footer mt-auto" aria-label="Pie de página" appScrollReveal>
+    <div class="container py-5">
+      <div class="row gy-4 pb-4">
+        <div class="col-lg-5">
+          <a class="brand footer-brand navbar-brand fw-bold" href="#" (click)="openStorePage(); $event.preventDefault()" aria-label="Nivel, volver al inicio">
+            <span class="brand-mark badge text-bg-primary rounded-circle">N</span>
+            <span>NIVEL<span class="brand-period">.</span></span>
+          </a>
+          <p class="footer-description mt-3 mb-3">Hecho para quienes siempre quieren una partida más. Descubre tu siguiente aventura.</p>
+          <span class="footer-note badge rounded-pill">Tienda académica · Compra simulada</span>
+        </div>
+        <nav class="col-6 col-lg-3 footer-links" aria-label="Explorar tienda">
+          <h2>Explora</h2>
+          <button type="button" (click)="openStorePage()">Inicio y catálogo</button>
+          <button type="button" (click)="openCart()">Carrito</button>
+        </nav>
+        <nav class="col-6 col-lg-4 footer-links" aria-label="Cuenta y administración">
+          <h2>Tu espacio</h2>
+          @if (user()) {
+            <button type="button" (click)="openAccount()">Mis compras</button>
+            @if (user()?.role === 'admin') {
+              <button type="button" (click)="openAdmin()">Administración</button>
+            }
+          } @else {
+            <button type="button" (click)="openAuth('login')">Iniciar sesión</button>
+            <button type="button" (click)="openAuth('register')">Crear cuenta</button>
+          }
+        </nav>
+      </div>
+      <div class="footer-bottom d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 pt-3 border-top">
+        <span>© 2026 NIVEL. Proyecto académico.</span>
+        <span>Los pedidos son demostrativos; no se realizan cargos reales.</span>
+        <button class="footer-top-button btn btn-link p-0" type="button" (click)="scrollToTop()">Volver arriba ↑</button>
+      </div>
+    </div>
+  </footer>
+
+  @if (modal() === 'auth') {
+    <div class="dialog-overlay" (click)="closeModal()">
+      <section class="dialog auth-dialog card border-0 shadow-lg" role="dialog" aria-modal="true" aria-labelledby="auth-title" (click)="$event.stopPropagation()">
+        <button class="dialog-close btn-close" aria-label="Cerrar" (click)="closeModal()"></button>
+        <div class="auth-brand d-flex align-items-center gap-2 mb-4">
+          <span class="brand-mark badge text-bg-primary rounded-circle">N</span>
+          <span><strong class="d-block">NIVEL</strong><small class="text-secondary">Tu cuenta de jugador</small></span>
+        </div>
+        @if (authMode() === 'login') {
+          <div class="auth-heading mb-4">
+            <span class="badge text-bg-primary-subtle mb-2">QUÉ BUENO VERTE</span>
+            <h2 class="h3 fw-bold mb-2" id="auth-title">Bienvenido de vuelta</h2>
+            <p class="text-secondary mb-0">Inicia sesión para continuar con tu siguiente aventura.</p>
+          </div>
+          <form class="d-grid gap-3" (ngSubmit)="submitLogin()">
+            <label class="form-label mb-0">Correo electrónico<input class="form-control form-control-lg mt-1" aria-label="Correo electrónico" name="loginEmail" [(ngModel)]="loginForm.email" type="email" autocomplete="email" required placeholder="tu@correo.com" /></label>
+            <div class="password-form-field">
+              <label class="form-label mb-0" for="login-password">Contraseña</label>
+              <div class="password-field" [class.password-visible]="isPasswordVisible('login')">
+                <input class="form-control form-control-lg mt-1" id="login-password" aria-label="Contraseña" name="loginPassword" [(ngModel)]="loginForm.password" [type]="isPasswordVisible('login') ? 'text' : 'password'" autocomplete="current-password" required placeholder="Tu contraseña" />
+                <button class="password-toggle btn btn-link btn-sm" type="button" [attr.aria-label]="isPasswordVisible('login') ? 'Ocultar contraseña' : 'Mostrar contraseña'" [attr.aria-pressed]="isPasswordVisible('login')" (click)="togglePasswordVisibility('login')">{{ isPasswordVisible('login') ? 'Ocultar' : 'Mostrar' }}</button>
+              </div>
+            </div>
+            <button class="dialog-submit btn btn-primary btn-lg w-100" type="submit" [disabled]="loading()">{{ loading() ? 'Entrando...' : 'Iniciar sesión' }}</button>
+          </form>
+          <div class="auth-switch text-center border-top pt-3 mt-4"><span class="text-secondary">¿Aún no tienes cuenta?</span> <button class="btn btn-link fw-semibold p-0" (click)="authMode.set('register')">Crea una</button></div>
+        } @else {
+          <div class="auth-heading mb-4">
+            <span class="badge text-bg-primary-subtle mb-2">ÚNETE A NIVEL</span>
+            <h2 class="h3 fw-bold mb-2" id="auth-title">Crea tu cuenta</h2>
+            <p class="text-secondary mb-0">Guarda tus compras y arma tu colección.</p>
+          </div>
+          <form class="d-grid gap-3" (ngSubmit)="submitRegister()">
+            <label class="form-label mb-0">Nombre completo<input class="form-control form-control-lg mt-1" aria-label="Nombre completo" name="registerName" [(ngModel)]="registerForm.full_name" required minlength="2" maxlength="120" autocomplete="name" placeholder="Tu nombre" /></label>
+            <label class="form-label mb-0">Correo electrónico<input class="form-control form-control-lg mt-1" aria-label="Correo electrónico" name="registerEmail" [(ngModel)]="registerForm.email" type="email" required autocomplete="email" placeholder="tu@correo.com" /></label>
+            <div class="password-form-field">
+              <label class="form-label mb-0" for="register-password">Contraseña</label>
+              <div class="password-field" [class.password-visible]="isPasswordVisible('register')">
+                <input class="form-control form-control-lg mt-1" id="register-password" aria-label="Contraseña" name="registerPassword" [(ngModel)]="registerForm.password" [type]="isPasswordVisible('register') ? 'text' : 'password'" required minlength="8" maxlength="128" autocomplete="new-password" placeholder="Mínimo 8 caracteres" />
+                <button class="password-toggle btn btn-link btn-sm" type="button" [attr.aria-label]="isPasswordVisible('register') ? 'Ocultar contraseña' : 'Mostrar contraseña'" [attr.aria-pressed]="isPasswordVisible('register')" (click)="togglePasswordVisibility('register')">{{ isPasswordVisible('register') ? 'Ocultar' : 'Mostrar' }}</button>
+              </div>
+              <small class="password-help">Usa al menos 8 caracteres para proteger tu cuenta.</small>
+            </div>
+            <button class="dialog-submit btn btn-primary btn-lg w-100" type="submit" [disabled]="loading()">{{ loading() ? 'Creando cuenta...' : 'Crear cuenta' }}</button>
+          </form>
+          <div class="auth-switch text-center border-top pt-3 mt-4"><span class="text-secondary">¿Ya tienes cuenta?</span> <button class="btn btn-link fw-semibold p-0" (click)="authMode.set('login')">Inicia sesión</button></div>
+        }
+      </section>
+    </div>
+  }
+
+  @if (modal() === 'checkout') {
+    <div class="dialog-overlay" (click)="closeModal()">
+      <section class="dialog checkout-dialog card shadow" role="dialog" aria-modal="true" aria-labelledby="checkout-title" (click)="$event.stopPropagation()">
+        <button class="dialog-close btn-close" aria-label="Cerrar" (click)="closeModal()"></button><span class="eyebrow text-primary">ÚLTIMO PASO</span><h2 id="checkout-title">Confirma tu pedido</h2><p>Esta compra de demostración no realiza ningún cargo real.</p>
+        <div class="checkout-lines">@for (line of cart(); track line.game.id) { <div><span>{{ line.quantity }} × {{ line.game.title }}</span><b>{{ line.game.price * line.quantity | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</b></div> }</div>
+        <div class="summary-total"><span>Total</span><strong>{{ cartTotal() | currency:'MXN':'symbol-narrow':'1.2-2':'es-MX' }}</strong></div>
+        <button class="button button-primary dialog-submit btn btn-primary" (click)="confirmPurchase()" [disabled]="loading()">{{ loading() ? 'Confirmando...' : 'Confirmar pedido' }}</button>
+      </section>
+    </div>
+  }
+
+  @if (pendingDelete(); as pending) {
+    <div class="dialog-overlay confirmation-overlay" (click)="pendingDelete.set(null)">
+      <section class="dialog confirmation-dialog card" role="dialog" aria-modal="true" aria-labelledby="confirmation-title" (click)="$event.stopPropagation()">
+        <span class="eyebrow text-danger">CONFIRMA ESTA ACCIÓN</span>
+        <h2 id="confirmation-title">Confirmar eliminación</h2>
+        <p>{{ pending.kind === 'user' ? 'La cuenta de ' + pending.user.full_name + ' quedará inactiva. No podrá iniciar sesión y sus compras se conservarán.' : 'Se eliminará "' + pending.game.title + '" del catálogo.' }}</p>
+        <div class="d-flex justify-content-end gap-2">
+          <button class="btn btn-outline-secondary" type="button" (click)="pendingDelete.set(null)">Cancelar</button>
+          <button class="btn btn-danger" type="button" (click)="confirmDelete()">{{ pending.kind === 'user' ? 'Dar de baja' : 'Eliminar' }}</button>
+        </div>
+      </section>
+    </div>
+  }
+
+  @if (feedback(); as feedbackMessage) {
+    <div class="dialog-overlay feedback-overlay" (click)="dismissFeedback()">
+      <section class="dialog feedback-dialog card" role="dialog" aria-modal="true" aria-labelledby="feedback-title" (click)="$event.stopPropagation()">
+        <span class="feedback-icon" [class.feedback-icon-error]="feedbackMessage.kind === 'error'">{{ feedbackMessage.kind === 'error' ? '!' : '✓' }}</span>
+        <span class="eyebrow" [class.text-danger]="feedbackMessage.kind === 'error'" [class.text-success]="feedbackMessage.kind === 'success'">{{ feedbackMessage.kind === 'error' ? 'AVISO' : 'COMPLETADO' }}</span>
+        <h2 id="feedback-title">{{ feedbackMessage.kind === 'error' ? 'No se pudo completar' : 'Listo' }}</h2>
+        <p aria-live="assertive">{{ feedbackMessage.message }}</p>
+        <button class="btn btn-primary w-100" type="button" (click)="dismissFeedback()">Entendido</button>
+      </section>
+    </div>
+  }
+</div>

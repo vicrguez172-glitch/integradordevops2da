@@ -1,0 +1,196 @@
+name: CompraJuegos CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Pruebas y build
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: sqlite:////tmp/compra-juegos-tests.db
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            e2e/requirements.txt
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install -r backend/requirements.txt
+          python -m pip install -r e2e/requirements.txt
+          npm ci
+          mkdir -p test-results
+
+      - name: Pruebas pytest del backend
+        id: backend_tests
+        run: python -m pytest -q backend/tests --junitxml=test-results/backend.xml
+
+      - name: Build de Angular
+        id: frontend_build
+        run: npm run build
+
+      - name: Instalar navegador Playwright
+        run: python -m playwright install --with-deps chromium
+
+      - name: Iniciar entorno de pruebas
+        id: test_stack
+        run: docker compose -f compose.e2e.yaml up --build -d
+
+      - name: Esperar a que la aplicación responda
+        if: steps.test_stack.outcome == 'success'
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f compose.e2e.yaml logs
+          exit 1
+
+      - name: Pruebas Playwright end-to-end
+        id: playwright_tests
+        if: steps.test_stack.outcome == 'success'
+        timeout-minutes: 15
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+          E2E_ADMIN_EMAIL: admin@example.com
+          E2E_ADMIN_PASSWORD: e2e-only-admin-password
+        run: |
+          python -m pytest -q -s e2e/test_store.py --junitxml=test-results/playwright-store.xml
+          python -m pytest -q -s -n 4 e2e/test_ui_matrix.py --junitxml=test-results/playwright-matrix.xml
+
+      - name: Detener entorno de pruebas
+        id: test_stack_cleanup
+        if: always()
+        run: docker compose -f compose.e2e.yaml down --volumes --remove-orphans
+
+      - name: Guardar resultados XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultados-pruebas
+          path: test-results/*.xml
+          if-no-files-found: ignore
+
+      - name: Registrar resultado de pruebas en OpenObserve
+        if: always() && github.event_name != 'pull_request'
+        env:
+          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
+          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
+          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
+          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
+          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
+        run: |
+          python scripts/report_pipeline.py \
+            --event test_run \
+            --outcome "${{ steps.backend_tests.outcome }}" \
+            --outcome "${{ steps.frontend_build.outcome }}" \
+            --outcome "${{ steps.test_stack.outcome }}" \
+            --outcome "${{ steps.playwright_tests.outcome }}" \
+            --outcome "${{ steps.test_stack_cleanup.outcome }}"
+
+  deploy:
+    name: Desplegar en EC2
+    needs: tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.tests.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Verificar secretos de EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          for name in EC2_HOST EC2_USER EC2_SSH_KEY EC2_KNOWN_HOSTS; do
+            if [ -z "${!name}" ]; then
+              echo "Falta configurar el secreto $name."
+              exit 1
+            fi
+          done
+
+      - name: Preparar acceso SSH verificado
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Empaquetar versión probada
+        run: git archive --format=tar HEAD | gzip -n > compra-juegos.tar.gz
+
+      - name: Actualizar contenedores en EC2
+        id: deployment
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ vars.EC2_APP_DIR || '/opt/compra-juegos' }}
+        run: |
+          case "$EC2_APP_DIR" in
+            /*) ;;
+            *) echo "EC2_APP_DIR debe ser una ruta absoluta."; exit 1 ;;
+          esac
+          target="$EC2_USER@$EC2_HOST"
+          ssh "$target" "mkdir -p '$EC2_APP_DIR/releases'"
+          scp compra-juegos.tar.gz "$target:$EC2_APP_DIR/release-$GITHUB_SHA.tar.gz"
+          ssh "$target" sh -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          set -eu
+          app_dir=$1
+          release_sha=$2
+          release="$app_dir/releases/$release_sha"
+          mkdir -p "$release"
+          tar -xzf "$app_dir/release-$release_sha.tar.gz" -C "$release"
+          rm "$app_dir/release-$release_sha.tar.gz"
+          cd "$app_dir"
+          docker compose --project-name compra-juegos --file "$release/compose.yaml" up -d --build --remove-orphans
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8080/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose --project-name compra-juegos --file "$release/compose.yaml" logs
+          exit 1
+          REMOTE
+
+      - name: Registrar despliegue en OpenObserve
+        if: always()
+        env:
+          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
+          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
+          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
+          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
+          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
+        run: |
+          python scripts/report_pipeline.py \
+            --event deployment \
+            --outcome "${{ needs.tests.result }}" \
+            --outcome "${{ steps.deployment.outcome }}"

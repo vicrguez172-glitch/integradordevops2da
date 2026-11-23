@@ -1,0 +1,17 @@
+.git
+.github
+.vscode
+.angular
+node_modules
+dist
+coverage
+e2e
+backend/data
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+.env
+.env.*
+!.env.example
+playwright-report
+test-results

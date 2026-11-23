@@ -1,0 +1,57 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+  hostmetrics/ec2:
+    root_path: /hostfs
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.limit:
+            enabled: true
+      network: {}
+      hardware: {}
+
+processors:
+  batch:
+    timeout: 2s
+    send_batch_size: 1024
+  resource/ec2:
+    attributes:
+      - key: service.name
+        value: ec2-host
+        action: insert
+
+exporters:
+  otlp_http/openobserve:
+    endpoint: http://openobserve:5080/api/default
+    logs_endpoint: http://openobserve:5080/api/default/v1/logs
+    traces_endpoint: http://openobserve:5080/api/default/v1/traces
+    metrics_endpoint: http://openobserve:5080/api/default/v1/metrics_json
+    headers:
+      Authorization: "Basic ${env:OO_BASIC_AUTH}"
+      stream-name: default
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/openobserve]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp_http/openobserve]
+    metrics:
+      receivers: [otlp, hostmetrics/ec2]
+      processors: [resource/ec2, batch]
+      exporters: [otlp_http/openobserve]

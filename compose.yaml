@@ -1,0 +1,69 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: sqlite:////app/data/compra_juegos.db
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      SECRET_KEY: ${SECRET_KEY:?Define SECRET_KEY en .env}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?Define BOOTSTRAP_ADMIN_EMAIL en .env}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Define BOOTSTRAP_ADMIN_PASSWORD en .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      OTEL_SERVICE_NAME: compra-juegos-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+    volumes:
+      - store-data:/app/data
+    depends_on:
+      - otel-collector
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    environment:
+      ZO_DATA_DIR: /data
+      ZO_ROOT_USER_EMAIL: ${ZO_ROOT_USER_EMAIL:?Define ZO_ROOT_USER_EMAIL en .env}
+      ZO_ROOT_USER_PASSWORD: ${ZO_ROOT_USER_PASSWORD:?Define ZO_ROOT_USER_PASSWORD en .env}
+    ports:
+      - "${OPENOBSERVE_PORT:-5080}:5080"
+    volumes:
+      - openobserve-data:/data
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    environment:
+      OO_BASIC_AUTH: ${OO_BASIC_AUTH:?Define OO_BASIC_AUTH en .env}
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - /:/hostfs:ro
+    depends_on:
+      - openobserve
+    restart: unless-stopped
+
+volumes:
+  store-data:
+  openobserve-data:
