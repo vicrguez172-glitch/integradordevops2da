@@ -33,11 +33,27 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "${WEB_PORT:-8080}:80"
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Define APP_DOMAIN en .env}
+      OPENOBSERVE_DOMAIN: ${OPENOBSERVE_DOMAIN:?Define OPENOBSERVE_DOMAIN en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+      - openobserve
     restart: unless-stopped
 
   openobserve:
@@ -46,8 +62,6 @@ services:
       ZO_DATA_DIR: /data
       ZO_ROOT_USER_EMAIL: ${ZO_ROOT_USER_EMAIL:?Define ZO_ROOT_USER_EMAIL en .env}
       ZO_ROOT_USER_PASSWORD: ${ZO_ROOT_USER_PASSWORD:?Define ZO_ROOT_USER_PASSWORD en .env}
-    ports:
-      - "${OPENOBSERVE_PORT:-5080}:5080"
     volumes:
       - openobserve-data:/data
     restart: unless-stopped
@@ -67,3 +81,5 @@ services:
 volumes:
   store-data:
   openobserve-data:
+  caddy-data:
+  caddy-config:

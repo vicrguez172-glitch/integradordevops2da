@@ -1,0 +1,8 @@
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
+
+{$OPENOBSERVE_DOMAIN} {
+	reverse_proxy openobserve:5080
+}

@@ -13,6 +13,12 @@ jobs:
   tests:
     name: Pruebas y build
     runs-on: ubuntu-latest
+    outputs:
+      backend_tests: ${{ steps.backend_tests.outcome }}
+      frontend_build: ${{ steps.frontend_build.outcome }}
+      test_stack: ${{ steps.test_stack.outcome }}
+      playwright_tests: ${{ steps.playwright_tests.outcome }}
+      test_stack_cleanup: ${{ steps.test_stack_cleanup.outcome }}
     env:
       DATABASE_URL: sqlite:////tmp/compra-juegos-tests.db
     steps:
@@ -94,23 +100,6 @@ jobs:
           path: test-results/*.xml
           if-no-files-found: ignore
 
-      - name: Registrar resultado de pruebas en OpenObserve
-        if: always() && github.event_name != 'pull_request'
-        env:
-          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
-          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
-          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
-          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
-          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
-        run: |
-          python scripts/report_pipeline.py \
-            --event test_run \
-            --outcome "${{ steps.backend_tests.outcome }}" \
-            --outcome "${{ steps.frontend_build.outcome }}" \
-            --outcome "${{ steps.test_stack.outcome }}" \
-            --outcome "${{ steps.playwright_tests.outcome }}" \
-            --outcome "${{ steps.test_stack_cleanup.outcome }}"
-
   deploy:
     name: Desplegar en EC2
     needs: tests
@@ -162,7 +151,7 @@ jobs:
           target="$EC2_USER@$EC2_HOST"
           ssh "$target" "mkdir -p '$EC2_APP_DIR/releases'"
           scp compra-juegos.tar.gz "$target:$EC2_APP_DIR/release-$GITHUB_SHA.tar.gz"
-          ssh "$target" sh -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          ssh "$target" bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
           set -eu
           app_dir=$1
           release_sha=$2
@@ -171,16 +160,82 @@ jobs:
           tar -xzf "$app_dir/release-$release_sha.tar.gz" -C "$release"
           rm "$app_dir/release-$release_sha.tar.gz"
           cd "$app_dir"
-          docker compose --project-name compra-juegos --file "$release/compose.yaml" up -d --build --remove-orphans
+          compose=(docker compose --project-name compra-juegos --env-file "$app_dir/.env" --file "$release/compose.yaml")
+          "${compose[@]}" pull caddy openobserve otel-collector
+          legacy_containers=(api-proxy api-blue api-green webapp-container)
+          stopped_containers=()
+          restore_legacy() {
+            if [ "${#stopped_containers[@]}" -eq 0 ]; then return; fi
+            if ! "${compose[@]}" down; then
+              echo "No se pudo detener la nueva pila durante la restauración." >&2
+            fi
+            for container in "${stopped_containers[@]}"; do
+              if ! docker start "$container"; then
+                echo "No se pudo restaurar el contenedor previo $container." >&2
+              fi
+            done
+          }
+          for container in "${legacy_containers[@]}"; do
+            if docker inspect "$container" >/dev/null 2>&1 && [ "$(docker inspect -f '{{.State.Running}}' "$container")" = true ]; then
+              if ! docker stop "$container"; then
+                restore_legacy
+                exit 1
+              fi
+              stopped_containers+=("$container")
+            fi
+          done
+          if ! "${compose[@]}" build api; then
+            restore_legacy
+            exit 1
+          fi
+          if ! "${compose[@]}" build web; then
+            restore_legacy
+            exit 1
+          fi
+          if ! "${compose[@]}" up -d --no-build --remove-orphans; then
+            if ! "${compose[@]}" logs; then
+              echo "No se pudieron leer los logs de Compose." >&2
+            fi
+            restore_legacy
+            exit 1
+          fi
+          app_domain=$(sed -n 's/^APP_DOMAIN=//p' "$app_dir/.env")
+          observe_domain=$(sed -n 's/^OPENOBSERVE_DOMAIN=//p' "$app_dir/.env")
+          if [ -z "$app_domain" ] || [ -z "$observe_domain" ]; then
+            echo "APP_DOMAIN u OPENOBSERVE_DOMAIN no está configurado en .env." >&2
+            restore_legacy
+            exit 1
+          fi
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8080/api/health >/dev/null; then
+            if curl --fail --silent --max-time 5 --resolve "$app_domain:443:127.0.0.1" "https://$app_domain/api/health" >/dev/null 2>&1 &&
+              curl --fail --silent --max-time 5 --resolve "$observe_domain:443:127.0.0.1" "https://$observe_domain/" >/dev/null 2>&1; then
               exit 0
             fi
             sleep 2
           done
-          docker compose --project-name compra-juegos --file "$release/compose.yaml" logs
+          if ! "${compose[@]}" logs; then
+            echo "No se pudieron leer los logs de Compose." >&2
+          fi
+          restore_legacy
           exit 1
           REMOTE
+
+      - name: Registrar resultado de pruebas en OpenObserve
+        if: always()
+        env:
+          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
+          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
+          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
+          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
+          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
+        run: |
+          python scripts/report_pipeline.py \
+            --event test_run \
+            --outcome "${{ needs.tests.outputs.backend_tests }}" \
+            --outcome "${{ needs.tests.outputs.frontend_build }}" \
+            --outcome "${{ needs.tests.outputs.test_stack }}" \
+            --outcome "${{ needs.tests.outputs.playwright_tests }}" \
+            --outcome "${{ needs.tests.outputs.test_stack_cleanup }}"
 
       - name: Registrar despliegue en OpenObserve
         if: always()
@@ -195,3 +250,24 @@ jobs:
             --event deployment \
             --outcome "${{ needs.tests.result }}" \
             --outcome "${{ steps.deployment.outcome }}"
+
+  report-failed-tests:
+    name: Registrar pruebas fallidas en OpenObserve
+    needs: tests
+    if: github.event_name != 'pull_request' && needs.tests.result == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Registrar resultado de pruebas
+        env:
+          OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
+          OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}
+          OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
+          OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
+          OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
+        run: |
+          python scripts/report_pipeline.py \
+            --event test_run \
+            --outcome "${{ needs.tests.result }}"

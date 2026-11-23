@@ -73,7 +73,7 @@ Playwright registra para cada petición API el timestamp UTC, endpoint, método,
 
 ## Levantar los contenedores
 
-Instala Docker Desktop o Docker Engine con Docker Compose. Copia el ejemplo y reemplaza las claves antes de iniciar:
+Instala Docker Desktop o Docker Engine con Docker Compose. Para despliegue, los subdominios DuckDNS configurados para este proyecto son `tienda-videojuegos.duckdns.org` y `obs-videojuegos.duckdns.org`; ambos deben apuntar a la IP pública actual de EC2. Copia el ejemplo y reemplaza todas las credenciales antes de iniciar:
 
 ```powershell
 Copy-Item .env.example .env
@@ -81,10 +81,12 @@ docker compose config --quiet
 docker compose up --build -d
 ```
 
-- Tienda: <http://localhost:8080>
-- API: disponible a través de `/api` en el mismo host.
-- OpenObserve: <http://localhost:5080>
+- Tienda: `https://tienda-videojuegos.duckdns.org`
+- API: disponible a través de `/api` en el mismo dominio de la tienda.
+- OpenObserve: `https://obs-videojuegos.duckdns.org`
 - El correo y password de OpenObserve son los configurados en `.env`.
+- Caddy obtiene y renueva certificados HTTPS de Let's Encrypt. El security group debe permitir TCP 80/443; no se publica el puerto 5080. El puerto SSH 22 debe limitarse a una IP de confianza.
+- Sin Elastic IP, si la IP pública de EC2 cambia al detener/iniciar la instancia, actualiza ambos subdominios en DuckDNS.
 
 `OO_BASIC_AUTH` debe ser Base64 de `ZO_ROOT_USER_EMAIL:ZO_ROOT_USER_PASSWORD`. Para generarlo en PowerShell:
 
@@ -93,7 +95,7 @@ $pair = "correo-configurado:password-configurado"
 [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($pair))
 ```
 
-Pega el resultado en `OO_BASIC_AUTH` en `.env`. Si cambias el usuario o password de OpenObserve, actualiza ambos valores y vuelve a generar esta cadena. No uses las credenciales de ejemplo en un servidor público ni guardes secretos reales en Git.
+Pega el resultado en `OO_BASIC_AUTH` en `.env`. Si cambias el usuario o password de OpenObserve, actualiza ambos valores y vuelve a generar esta cadena. Usa un valor único y fuerte para `SECRET_KEY` y para cada contraseña. No uses las credenciales de ejemplo en un servidor público ni guardes secretos reales en Git.
 
 Detener los servicios sin borrar datos: `docker compose down`. Los volúmenes `store-data` y `openobserve-data` conservan la base SQLite y los datos de monitoreo. `docker compose down --volumes` los elimina.
 
@@ -107,11 +109,11 @@ El entorno de pruebas usa credenciales fijas únicamente para el contenedor e2e 
 
 ## Observabilidad
 
-La API envía logs estructurados, trazas FastAPI/SQLAlchemy y métricas HTTP OTLP al OpenTelemetry Collector. Las métricas HTTP incluyen ruta, método, status code, contador y duración. El Collector envía señales a OpenObserve por OTLP/HTTP.
+La API envía logs estructurados, trazas FastAPI/SQLAlchemy y métricas HTTP OTLP al OpenTelemetry Collector. Las métricas HTTP incluyen ruta, método, status code, contador y duración. El Collector envía señales a OpenObserve por OTLP/HTTP. Caddy termina TLS para el sitio y OpenObserve; Prometheus/Grafana no son necesarios para los dashboards incluidos en esta arquitectura.
 
 El Collector también consulta cada 30 segundos métricas de host Linux para CPU, memoria, red y sensores térmicos disponibles. La temperatura depende de que EC2 exponga un sensor en `sysfs/hwmon`; algunas instancias no exponen temperatura y en ese caso la métrica no aparecerá. Los contenedores de Windows/Docker Desktop no representan necesariamente los sensores del host Windows.
 
-Configurar y guardar dashboards y alertas en la interfaz de OpenObserve. La dirección predeterminada del host OpenObserve en Compose es el puerto 5080; protégela con TLS/autenticación y restringe su acceso de red en EC2.
+Configurar y guardar dashboards y alertas en la interfaz de OpenObserve. EC2 no publica directamente el puerto 5080; la interfaz se sirve por el subdominio HTTPS de OpenObserve.
 
 ## GitHub Actions y EC2
 
@@ -121,7 +123,7 @@ Configura en GitHub:
 
 **Secrets requeridos**
 
-- `OPENOBSERVE_URL`: base URL accesible desde GitHub Actions, por ejemplo `https://observabilidad.tudominio`.
+- `OPENOBSERVE_URL`: `https://obs-videojuegos.duckdns.org`.
 - `OPENOBSERVE_EMAIL`, `OPENOBSERVE_PASSWORD`: cuenta de OpenObserve con permiso de escritura en el stream configurado.
 - `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`: host/IP, usuario SSH y clave privada para EC2.
 - `EC2_KNOWN_HOSTS`: línea `known_hosts` verificada para ese servidor. No desactives la verificación SSH.
@@ -132,9 +134,9 @@ Configura en GitHub:
 - `OPENOBSERVE_STREAM` (predeterminado `ci_cd`).
 - `EC2_APP_DIR` (predeterminado `/opt/compra-juegos`).
 
-Antes del primer push a `main`, prepara EC2 con Docker/Compose, crea el directorio de despliegue y coloca allí un `.env` seguro con `SECRET_KEY`, credenciales de admin y OpenObserve. El usuario SSH debe poder escribir en el directorio y ejecutar Docker Compose. El workflow conserva ese `.env` y los volúmenes fuera de las carpetas de release.
+Antes del primer despliegue, prepara EC2 con Docker/Compose, configura los subdominios DuckDNS y coloca un `.env` seguro en el directorio de despliegue con dominios, `SECRET_KEY`, credenciales del admin y de OpenObserve. Los valores `OPENOBSERVE_EMAIL`/`OPENOBSERVE_PASSWORD` de GitHub deben coincidir con `ZO_ROOT_USER_EMAIL`/`ZO_ROOT_USER_PASSWORD` del `.env`. El usuario SSH debe poder escribir en el directorio y ejecutar Docker Compose. El workflow conserva ese `.env` y los volúmenes fuera de las carpetas de release.
 
-La aplicación se publica inicialmente en el puerto 8080 y OpenObserve en 5080. Configura los security groups para exponer solo lo necesario; restringe SSH a un origen de confianza. Usa HTTPS/proxy inverso para acceso público y un runner de GitHub con salida SSH estable si la red impide acceso seguro desde runners hospedados. El despliegue real requiere un EC2, secretos válidos y un OpenObserve alcanzable; no se incluyen ni deben añadirse credenciales al repositorio.
+La primera transición detiene los contenedores heredados `api-proxy`, `api-blue`, `api-green` y `webapp-container` para liberar los puertos y memoria; no los elimina. Si el arranque falla, el workflow intenta restaurarlos. La aplicación y OpenObserve se publican por HTTPS en sus respectivos subdominios mediante Caddy. Configura el security group para permitir 80/443 y restringir SSH a un origen de confianza; no abras 5080. El despliegue requiere que OpenObserve sea alcanzable desde GitHub Actions y que los secretos estén configurados; no se incluyen ni deben añadirse credenciales al repositorio.
 
 ## Reporte académico
 
