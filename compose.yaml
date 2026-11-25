@@ -86,6 +86,24 @@ services:
       - openobserve
     restart: unless-stopped
 
+  cpu-temp-estimator:
+    image: python:3.12-alpine
+    command: ["python", "-u", "/app/cpu_temp_estimator.py"]
+    environment:
+      OTLP_METRICS_ENDPOINT: http://otel-collector:4318/v1/metrics
+      CPU_STAT_PATH: /host/proc/stat
+      CPU_TEMP_ESTIMATE_INTERVAL_SECONDS: "30"
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - ./observability/cpu_temp_estimator.py:/app/cpu_temp_estimator.py:ro
+      - /proc:/host/proc:ro
+    depends_on:
+      - otel-collector
+    mem_limit: 64m
+    read_only: true
+    user: "65534:65534"
+    restart: unless-stopped
+
 volumes:
   store-data:
   openobserve-data:

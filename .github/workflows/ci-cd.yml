@@ -37,7 +37,7 @@ jobs:
 
       - name: Probar el reportero de OpenObserve
         id: reporter_tests
-        run: python -m unittest scripts.test_report_pipeline
+        run: python -m unittest scripts.test_report_pipeline scripts.test_cpu_temp_estimator
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -215,7 +215,7 @@ jobs:
           rm "$app_dir/frontend-$release_sha.tar.gz"
           cd "$app_dir"
           compose=(docker compose --project-name compra-juegos --env-file "$app_dir/.env" --file "$release/compose.yaml")
-          "${compose[@]}" pull caddy openobserve otel-collector web
+          "${compose[@]}" pull caddy openobserve otel-collector web cpu-temp-estimator
           legacy_containers=(api-proxy api-blue api-green webapp-container)
           stopped_containers=()
           restore_legacy() {
@@ -263,6 +263,24 @@ jobs:
           if [ "$collector_running" != true ]; then
             if ! "${compose[@]}" logs otel-collector; then
               echo "No se pudieron leer los logs del Collector." >&2
+            fi
+            restore_legacy
+            exit 1
+          fi
+          estimator_running=false
+          for attempt in $(seq 1 10); do
+            estimator_id=$("${compose[@]}" ps -q cpu-temp-estimator)
+            if [ -n "$estimator_id" ] &&
+              [ "$(docker inspect -f '{{.State.Running}}' "$estimator_id")" = true ] &&
+              [ "$(docker inspect -f '{{.RestartCount}}' "$estimator_id")" -eq 0 ]; then
+              estimator_running=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$estimator_running" != true ]; then
+            if ! "${compose[@]}" logs cpu-temp-estimator; then
+              echo "No se pudieron leer los logs del estimador de temperatura sintética." >&2
             fi
             restore_legacy
             exit 1
