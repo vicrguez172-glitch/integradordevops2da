@@ -21,11 +21,14 @@ class PipelineIncidentTests(unittest.TestCase):
 
         self.assertEqual(len(events), 2)
         self.assertEqual(events[0]["status"], "failure")
-        self.assertEqual(events[0]["failed_steps"], ["step_2", "step_3"])
+        self.assertEqual(events[0]["failed_steps"], ["step_2"])
+        self.assertEqual(events[0]["skipped_steps"], ["step_3"])
         self.assertTrue(events[0]["deployment_blocked"])
         self.assertEqual(events[1]["event_type"], "pipeline_incident")
         self.assertEqual(events[1]["incident_type"], "pipeline_step_failure")
         self.assertEqual(events[1]["failed_event"], "test_run")
+        self.assertEqual(events[1]["failed_steps"], ["step_2"])
+        self.assertEqual(events[1]["skipped_steps"], ["step_3"])
         self.assertEqual(events[1]["run_id"], "12345")
         self.assertTrue(events[1]["deployment_blocked"])
 

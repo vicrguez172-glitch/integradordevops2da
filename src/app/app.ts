@@ -283,7 +283,7 @@ export class App implements OnInit {
           this.view.set('account');
           this.loadPurchases();
           this.loadGames();
-          this.showNotice(`Pedido #${purchase.id} confirmado. ¡Gracias por tu pedido!`);
+          this.showNotice(`Compra #${purchase.id} confirmada. ¡Gracias por tu pedido!`);
         },
         error: (error: unknown) =>
           this.showError(this.apiErrorMessage(error, 'No se pudo procesar la compra.')),

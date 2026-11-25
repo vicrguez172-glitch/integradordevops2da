@@ -33,7 +33,12 @@ def build_event(event_type: str, outcomes: list[str]) -> dict[str, object]:
     failed_steps = [
         f"step_{index}"
         for index, outcome in enumerate(outcomes, start=1)
-        if outcome != "success"
+        if outcome == "failure"
+    ]
+    skipped_steps = [
+        f"step_{index}"
+        for index, outcome in enumerate(outcomes, start=1)
+        if outcome == "skipped"
     ]
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -41,6 +46,7 @@ def build_event(event_type: str, outcomes: list[str]) -> dict[str, object]:
         "status": status,
         "step_outcomes": outcome_map,
         "failed_steps": failed_steps,
+        "skipped_steps": skipped_steps,
         "deployment_blocked": (
             status == "failure"
             and event_type == "test_run"
@@ -64,6 +70,7 @@ def build_events(event_type: str, outcomes: list[str]) -> list[dict[str, object]
                 "incident_type": "pipeline_step_failure",
                 "failed_event": event_type,
                 "failed_steps": event["failed_steps"],
+                "skipped_steps": event["skipped_steps"],
                 "deployment_blocked": event["deployment_blocked"],
             }
         )
