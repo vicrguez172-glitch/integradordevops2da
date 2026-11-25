@@ -264,7 +264,6 @@ jobs:
           rm "$app_dir/frontend-$release_sha.tar.gz"
           cd "$app_dir"
           compose=(docker compose --project-name compra-juegos --env-file "$app_dir/.env" --file "$release/compose.yaml")
-          "${compose[@]}" pull caddy openobserve otel-collector web cpu-temp-estimator
           legacy_containers=(api-proxy api-blue api-green webapp-container)
           stopped_containers=()
           restore_legacy() {
@@ -291,7 +290,7 @@ jobs:
             restore_legacy
             exit 1
           fi
-          if ! "${compose[@]}" up -d --no-build --remove-orphans; then
+          if ! "${compose[@]}" up -d --no-build --remove-orphans --pull never; then
             if ! "${compose[@]}" logs; then
               echo "No se pudieron leer los logs de Compose." >&2
             fi
