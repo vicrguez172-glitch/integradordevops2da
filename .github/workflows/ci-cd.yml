@@ -2,7 +2,7 @@ name: CompraJuegos CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'acceptance/**']
   pull_request:
     branches: [main]
 
@@ -138,7 +138,6 @@ jobs:
 
       - name: Registrar resumen y resultados individuales en OpenObserve
         if: always() && github.event_name != 'pull_request'
-        continue-on-error: true
         env:
           OPENOBSERVE_URL: ${{ secrets.OPENOBSERVE_URL }}
           OPENOBSERVE_EMAIL: ${{ secrets.OPENOBSERVE_EMAIL }}

@@ -6,7 +6,41 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from scripts.report_pipeline import build_junit_events, send_events
+from scripts.report_pipeline import build_events, build_junit_events, send_events
+
+
+class PipelineIncidentTests(unittest.TestCase):
+    def test_failed_main_push_creates_incident_and_marks_deploy_blocked(self):
+        environment = {
+            "GITHUB_EVENT_NAME": "push",
+            "GITHUB_REF": "refs/heads/main",
+            "GITHUB_RUN_ID": "12345",
+        }
+        with patch.dict(os.environ, environment):
+            events = build_events("test_run", ["success", "failure", "skipped"])
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["status"], "failure")
+        self.assertEqual(events[0]["failed_steps"], ["step_2", "step_3"])
+        self.assertTrue(events[0]["deployment_blocked"])
+        self.assertEqual(events[1]["event_type"], "pipeline_incident")
+        self.assertEqual(events[1]["incident_type"], "pipeline_step_failure")
+        self.assertEqual(events[1]["failed_event"], "test_run")
+        self.assertEqual(events[1]["run_id"], "12345")
+        self.assertTrue(events[1]["deployment_blocked"])
+
+    def test_failure_on_non_deployable_ref_does_not_claim_main_deploy_blocked(self):
+        with patch.dict(
+            os.environ,
+            {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feature"},
+        ):
+            events = build_events("test_run", ["failure"])
+
+        self.assertFalse(events[0]["deployment_blocked"])
+        self.assertFalse(events[1]["deployment_blocked"])
+
+    def test_successful_pipeline_does_not_create_incident(self):
+        self.assertEqual(len(build_events("test_run", ["success", "success"])), 1)
 
 
 class JUnitEventTests(unittest.TestCase):

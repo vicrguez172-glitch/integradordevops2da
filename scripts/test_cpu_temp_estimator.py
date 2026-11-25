@@ -58,7 +58,7 @@ class CpuTemperatureEstimateTests(unittest.TestCase):
         self.assertEqual(data_point["timeUnixNano"], "123")
         self.assertEqual(attributes["estimated"]["stringValue"], "true")
         self.assertEqual(attributes["source"]["stringValue"], "cpu_utilization_formula")
-        self.assertEqual(attributes["cpu_utilization_percent"]["doubleValue"], 50.0)
+        self.assertNotIn("cpu_utilization_percent", attributes)
         json.dumps(payload)
 
 

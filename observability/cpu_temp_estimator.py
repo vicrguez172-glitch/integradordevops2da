@@ -66,10 +66,6 @@ def build_otlp_payload(
         {"key": "estimated", "value": {"stringValue": "true"}},
         {"key": "source", "value": {"stringValue": "cpu_utilization_formula"}},
         {"key": "formula", "value": {"stringValue": FORMULA}},
-        {
-            "key": "cpu_utilization_percent",
-            "value": {"doubleValue": cpu_utilization_percent},
-        },
     ]
     return {
         "resourceMetrics": [

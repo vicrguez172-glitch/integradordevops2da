@@ -29,13 +29,45 @@ def event_metadata() -> dict[str, str]:
 
 def build_event(event_type: str, outcomes: list[str]) -> dict[str, object]:
     outcome_map = {f"step_{index}": value for index, value in enumerate(outcomes, start=1)}
+    status = "success" if outcomes and all(value == "success" for value in outcomes) else "failure"
+    failed_steps = [
+        f"step_{index}"
+        for index, outcome in enumerate(outcomes, start=1)
+        if outcome != "success"
+    ]
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event_type": event_type,
-        "status": "success" if outcomes and all(value == "success" for value in outcomes) else "failure",
+        "status": status,
         "step_outcomes": outcome_map,
+        "failed_steps": failed_steps,
+        "deployment_blocked": (
+            status == "failure"
+            and event_type == "test_run"
+            and os.getenv("GITHUB_EVENT_NAME") == "push"
+            and os.getenv("GITHUB_REF") == "refs/heads/main"
+        ),
         **event_metadata(),
     }
+
+
+def build_events(event_type: str, outcomes: list[str]) -> list[dict[str, object]]:
+    event = build_event(event_type, outcomes)
+    events = [event]
+    if event["status"] == "failure":
+        events.append(
+            {
+                **event_metadata(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "event_type": "pipeline_incident",
+                "status": "failure",
+                "incident_type": "pipeline_step_failure",
+                "failed_event": event_type,
+                "failed_steps": event["failed_steps"],
+                "deployment_blocked": event["deployment_blocked"],
+            }
+        )
+    return events
 
 
 def _test_status(testcase: ET.Element) -> str:
@@ -190,7 +222,7 @@ def main() -> int:
     parser.add_argument("--require-http-metrics", action="store_true")
     arguments = parser.parse_args()
     try:
-        events = [build_event(arguments.event, arguments.outcome)]
+        events = build_events(arguments.event, arguments.outcome)
         if arguments.junit_dir is not None:
             all_steps_passed = bool(arguments.outcome) and all(
                 outcome == "success" for outcome in arguments.outcome
