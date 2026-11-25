@@ -146,6 +146,9 @@ jobs:
     needs: tests
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.tests.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Descargar código
         uses: actions/checkout@v4
@@ -156,30 +159,79 @@ jobs:
           name: frontend-build
           path: deployment-dist
 
-      - name: Verificar secretos de EC2
+      - name: Verificar configuración de SSM y EC2
         env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID || 'i-08dced4f3e3520c72' }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
         run: |
-          for name in EC2_HOST EC2_USER EC2_SSH_KEY EC2_KNOWN_HOSTS; do
+          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION EC2_INSTANCE_ID EC2_HOST EC2_USER EC2_SSH_KEY EC2_KNOWN_HOSTS; do
             if [ -z "${!name}" ]; then
-              echo "Falta configurar el secreto $name."
+              echo "Falta configurar $name en GitHub Actions."
               exit 1
             fi
           done
+          if [[ ! "$EC2_INSTANCE_ID" =~ ^i-[0-9a-f]{8}([0-9a-f]{9})?$ ]]; then
+            echo "EC2_INSTANCE_ID tiene un formato inválido." >&2
+            exit 1
+          fi
 
-      - name: Preparar acceso SSH verificado
+      - name: Obtener credenciales AWS mediante OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
+          role-session-name: compra-juegos-${{ github.run_id }}
+
+      - name: Verificar que EC2 está conectado a SSM
         env:
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID || 'i-08dced4f3e3520c72' }}
+        run: |
+          ping_status=$(aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" \
+            --query 'InstanceInformationList[0].PingStatus' \
+            --output text)
+          if [ "$ping_status" != "Online" ]; then
+            echo "EC2 no está Online en Systems Manager (estado: $ping_status)." >&2
+            exit 1
+          fi
+
+      - name: Preparar SSH sobre Session Manager
+        env:
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID || 'i-08dced4f3e3520c72' }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
         run: |
+          if ! command -v session-manager-plugin >/dev/null 2>&1; then
+            curl --fail --silent --show-error --location \
+              https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb \
+              --output /tmp/session-manager-plugin.deb
+            sudo dpkg -i /tmp/session-manager-plugin.deb
+          fi
           install -m 700 -d ~/.ssh
           printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host ec2-ssm
+              HostName $EC2_INSTANCE_ID
+              User $EC2_USER
+              IdentityFile ~/.ssh/id_ed25519
+              IdentitiesOnly yes
+              ProxyCommand aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p
+              HostKeyAlias $EC2_HOST
+              UserKnownHostsFile ~/.ssh/known_hosts
+              StrictHostKeyChecking yes
+              BatchMode yes
+          EOF
+          chmod 600 ~/.ssh/config
+          session-manager-plugin --version
 
       - name: Empaquetar versión probada
         run: |
@@ -191,19 +243,16 @@ jobs:
       - name: Actualizar contenedores en EC2
         id: deployment
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
           EC2_APP_DIR: ${{ vars.EC2_APP_DIR || '/opt/compra-juegos' }}
         run: |
           case "$EC2_APP_DIR" in
             /*) ;;
             *) echo "EC2_APP_DIR debe ser una ruta absoluta."; exit 1 ;;
           esac
-          target="$EC2_USER@$EC2_HOST"
-          ssh "$target" "mkdir -p '$EC2_APP_DIR/releases'"
-          scp compra-juegos.tar.gz "$target:$EC2_APP_DIR/release-$GITHUB_SHA.tar.gz"
-          scp frontend-dist.tar.gz "$target:$EC2_APP_DIR/frontend-$GITHUB_SHA.tar.gz"
-          ssh "$target" bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          ssh ec2-ssm "mkdir -p '$EC2_APP_DIR/releases'"
+          scp compra-juegos.tar.gz "ec2-ssm:$EC2_APP_DIR/release-$GITHUB_SHA.tar.gz"
+          scp frontend-dist.tar.gz "ec2-ssm:$EC2_APP_DIR/frontend-$GITHUB_SHA.tar.gz"
+          ssh ec2-ssm bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
           set -eu
           app_dir=$1
           release_sha=$2
@@ -314,11 +363,9 @@ jobs:
       - name: Restaurar servicios anteriores si falla HTTPS
         if: steps.public_https.outcome == 'failure'
         env:
-          EC2_HOST: ${{ secrets.EC2_HOST }}
-          EC2_USER: ${{ secrets.EC2_USER }}
           EC2_APP_DIR: ${{ vars.EC2_APP_DIR || '/opt/compra-juegos' }}
         run: |
-          ssh "$EC2_USER@$EC2_HOST" bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          ssh ec2-ssm bash -s -- "$EC2_APP_DIR" "$GITHUB_SHA" <<'REMOTE'
           set -eu
           app_dir=$1
           release_sha=$2
