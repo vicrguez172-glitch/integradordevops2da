@@ -29,7 +29,11 @@ def event_metadata() -> dict[str, str]:
 
 def build_event(event_type: str, outcomes: list[str]) -> dict[str, object]:
     outcome_map = {f"step_{index}": value for index, value in enumerate(outcomes, start=1)}
-    status = "success" if outcomes and all(value == "success" for value in outcomes) else "failure"
+    status = (
+        "success"
+        if outcomes and all(value in {"success", "skipped"} for value in outcomes)
+        else "failure"
+    )
     failed_steps = [
         f"step_{index}"
         for index, outcome in enumerate(outcomes, start=1)

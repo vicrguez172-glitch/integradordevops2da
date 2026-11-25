@@ -45,6 +45,13 @@ class PipelineIncidentTests(unittest.TestCase):
     def test_successful_pipeline_does_not_create_incident(self):
         self.assertEqual(len(build_events("test_run", ["success", "success"])), 1)
 
+    def test_skipped_non_deployment_steps_do_not_create_incident(self):
+        events = build_events("test_run", ["success", "skipped"])
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "success")
+        self.assertEqual(events[0]["skipped_steps"], ["step_2"])
+
 
 class JUnitEventTests(unittest.TestCase):
     def test_builds_case_and_http_events_from_junit(self):
