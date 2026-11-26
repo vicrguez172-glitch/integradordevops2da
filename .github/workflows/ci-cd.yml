@@ -286,6 +286,9 @@ jobs:
               UserKnownHostsFile ~/.ssh/known_hosts
               StrictHostKeyChecking yes
               BatchMode yes
+              ConnectTimeout 30
+              ServerAliveInterval 30
+              ServerAliveCountMax 6
           EOF
           chmod 600 ~/.ssh/config
           session-manager-plugin --version
