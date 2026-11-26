@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from unittest.mock import MagicMock, patch
 
 from scripts.report_pipeline import build_events, build_junit_events, send_events
@@ -37,6 +38,30 @@ class PipelineIncidentTests(unittest.TestCase):
             os.environ,
             {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/heads/feature"},
         ):
+            events = build_events("test_run", ["failure"])
+
+        self.assertFalse(events[0]["deployment_blocked"])
+        self.assertFalse(events[1]["deployment_blocked"])
+
+    def test_manual_failure_probe_on_main_marks_deployment_blocked(self):
+        environment = {
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": "refs/heads/main",
+            "ACCEPTANCE_FAILURE_PROBE": "true",
+        }
+        with patch.dict(os.environ, environment):
+            events = build_events("test_run", ["success", "failure"])
+
+        self.assertTrue(events[0]["deployment_blocked"])
+        self.assertTrue(events[1]["deployment_blocked"])
+
+    def test_manual_run_without_failure_probe_does_not_claim_deploy_blocked(self):
+        environment = {
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": "refs/heads/main",
+            "ACCEPTANCE_FAILURE_PROBE": "false",
+        }
+        with patch.dict(os.environ, environment):
             events = build_events("test_run", ["failure"])
 
         self.assertFalse(events[0]["deployment_blocked"])
@@ -114,6 +139,31 @@ class JUnitEventTests(unittest.TestCase):
         self.assertEqual(request_events[0]["status_code"], 201)
         self.assertEqual(request_events[0]["response_time_ms"], 24.5)
         self.assertEqual(request_events[0]["timestamp"], "2026-11-23T08:00:00+00:00")
+
+    def test_includes_optional_acceptance_probe_junit_result(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            report_path = Path(temporary_directory) / "playwright-probe.xml"
+            root = ET.Element("testsuites")
+            suite = ET.SubElement(
+                root, "testsuite", name="e2e.test_acceptance_failure_probe"
+            )
+            testcase = ET.SubElement(
+                suite,
+                "testcase",
+                classname="e2e.test_acceptance_failure_probe",
+                name="test_acceptance_failure_probe",
+                time="5.0",
+            )
+            ET.SubElement(testcase, "failure", message="intentional visual assertion")
+            ET.ElementTree(root).write(report_path, encoding="utf-8", xml_declaration=True)
+
+            events = build_junit_events(Path(temporary_directory))
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_type"], "test_case")
+        self.assertEqual(events[0]["status"], "failed")
+        self.assertEqual(events[0]["test_name"], "test_acceptance_failure_probe")
+        self.assertEqual(events[0]["test_file"], "playwright-probe.xml")
 
     def test_reports_all_expected_backend_and_browser_cases(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -210,6 +260,88 @@ class EventBatchTests(unittest.TestCase):
         )
         self.assertEqual(len(json.loads(first_request.data)), 200)
         self.assertEqual(len(json.loads(final_request.data)), 125)
+
+    def test_retries_transient_network_and_server_errors(self):
+        response = MagicMock()
+        response.__enter__.return_value.status = 200
+        server_error = HTTPError(
+            "https://observe.example.test/api/default/ci_cd/_json",
+            503,
+            "Service Unavailable",
+            None,
+            None,
+        )
+        environment = {
+            "OPENOBSERVE_URL": "https://observe.example.test",
+            "OPENOBSERVE_EMAIL": "test@example.test",
+            "OPENOBSERVE_PASSWORD": "test-password",
+        }
+        with (
+            patch.dict(os.environ, environment),
+            patch(
+                "scripts.report_pipeline.urlopen",
+                side_effect=[URLError("TLS handshake timed out"), server_error, response],
+            ) as mocked_urlopen,
+            patch("scripts.report_pipeline.time.sleep") as mocked_sleep,
+        ):
+            send_events([{"event_type": "pipeline_incident"}])
+
+        self.assertEqual(mocked_urlopen.call_count, 3)
+        self.assertEqual(
+            [call.args[0].full_url for call in mocked_urlopen.call_args_list],
+            ["https://observe.example.test/api/default/ci_cd/_json"] * 3,
+        )
+        self.assertEqual(
+            [call.args[0] for call in mocked_sleep.call_args_list],
+            [1, 2],
+        )
+
+    def test_does_not_retry_non_transient_http_errors(self):
+        client_error = HTTPError(
+            "https://observe.example.test/api/default/ci_cd/_json",
+            401,
+            "Unauthorized",
+            None,
+            None,
+        )
+        environment = {
+            "OPENOBSERVE_URL": "https://observe.example.test",
+            "OPENOBSERVE_EMAIL": "test@example.test",
+            "OPENOBSERVE_PASSWORD": "test-password",
+        }
+        with (
+            patch.dict(os.environ, environment),
+            patch("scripts.report_pipeline.urlopen", side_effect=client_error) as mocked_urlopen,
+            patch("scripts.report_pipeline.time.sleep") as mocked_sleep,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 401"):
+                send_events([{"event_type": "pipeline_incident"}])
+
+        mocked_urlopen.assert_called_once()
+        mocked_sleep.assert_not_called()
+
+    def test_reports_transient_failure_after_retry_limit(self):
+        environment = {
+            "OPENOBSERVE_URL": "https://observe.example.test",
+            "OPENOBSERVE_EMAIL": "test@example.test",
+            "OPENOBSERVE_PASSWORD": "test-password",
+        }
+        with (
+            patch.dict(os.environ, environment),
+            patch(
+                "scripts.report_pipeline.urlopen",
+                side_effect=URLError("TLS handshake timed out"),
+            ) as mocked_urlopen,
+            patch("scripts.report_pipeline.time.sleep") as mocked_sleep,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "tras 3 intentos"):
+                send_events([{"event_type": "pipeline_incident"}])
+
+        self.assertEqual(mocked_urlopen.call_count, 3)
+        self.assertEqual(
+            [call.args[0] for call in mocked_sleep.call_args_list],
+            [1, 2],
+        )
 
 
 if __name__ == "__main__":

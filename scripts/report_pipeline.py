@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -13,6 +14,9 @@ import xml.etree.ElementTree as ET
 
 
 EVENT_BATCH_SIZE = 200
+OPENOBSERVE_MAX_ATTEMPTS = 3
+OPENOBSERVE_RETRY_DELAYS_SECONDS = (1, 2)
+OPENOBSERVE_TIMEOUT_SECONDS = 20
 
 
 def event_metadata() -> dict[str, str]:
@@ -44,6 +48,16 @@ def build_event(event_type: str, outcomes: list[str]) -> dict[str, object]:
         for index, outcome in enumerate(outcomes, start=1)
         if outcome == "skipped"
     ]
+    deployment_eligible = (
+        os.getenv("GITHUB_REF") == "refs/heads/main"
+        and (
+            os.getenv("GITHUB_EVENT_NAME") == "push"
+            or (
+                os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"
+                and os.getenv("ACCEPTANCE_FAILURE_PROBE", "").lower() == "true"
+            )
+        )
+    )
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event_type": event_type,
@@ -54,8 +68,7 @@ def build_event(event_type: str, outcomes: list[str]) -> dict[str, object]:
         "deployment_blocked": (
             status == "failure"
             and event_type == "test_run"
-            and os.getenv("GITHUB_EVENT_NAME") == "push"
-            and os.getenv("GITHUB_REF") == "refs/heads/main"
+            and deployment_eligible
         ),
         **event_metadata(),
     }
@@ -210,18 +223,45 @@ def send_events(events: Iterable[dict[str, object]]) -> None:
             },
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=20) as response:
-                if not 200 <= response.status < 300:
-                    raise RuntimeError(f"OpenObserve rechazó el lote: HTTP {response.status}")
-                print(
-                    f"Lote {batch_number}/{len(batches)} registrado en OpenObserve "
-                    f"({len(batch)} eventos, HTTP {response.status})."
+        for attempt in range(1, OPENOBSERVE_MAX_ATTEMPTS + 1):
+            try:
+                with urlopen(request, timeout=OPENOBSERVE_TIMEOUT_SECONDS) as response:
+                    if not 200 <= response.status < 300:
+                        raise RuntimeError(
+                            f"OpenObserve rechazó el lote: HTTP {response.status}"
+                        )
+                    print(
+                        f"Lote {batch_number}/{len(batches)} registrado en OpenObserve "
+                        f"({len(batch)} eventos, HTTP {response.status})."
+                    )
+                break
+            except HTTPError as error:
+                status_code = error.code
+                if error.fp is not None:
+                    error.close()
+                if status_code not in {408, 425, 429} and status_code < 500:
+                    raise RuntimeError(
+                        f"OpenObserve respondió HTTP {status_code}."
+                    ) from error
+                failure_reason = f"HTTP {status_code}"
+            except URLError as error:
+                failure_reason = str(error.reason)
+            except TimeoutError as error:
+                failure_reason = str(error)
+
+            if attempt == OPENOBSERVE_MAX_ATTEMPTS:
+                raise RuntimeError(
+                    f"No se pudo contactar OpenObserve tras {attempt} intentos: "
+                    f"{failure_reason}."
                 )
-        except HTTPError as error:
-            raise RuntimeError(f"OpenObserve respondió HTTP {error.code}.") from error
-        except URLError as error:
-            raise RuntimeError(f"No se pudo contactar OpenObserve: {error.reason}.") from error
+
+            delay = OPENOBSERVE_RETRY_DELAYS_SECONDS[attempt - 1]
+            print(
+                f"OpenObserve no disponible ({failure_reason}); "
+                f"reintento {attempt + 1}/{OPENOBSERVE_MAX_ATTEMPTS} en {delay}s.",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
 
 
 def main() -> int:

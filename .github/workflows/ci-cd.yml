@@ -5,6 +5,13 @@ on:
     branches: [main, 'acceptance/**']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      acceptance_failure_probe:
+        description: "Ejecuta una aserción visual fallida para verificar el bloqueo del despliegue en main."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -97,9 +104,15 @@ jobs:
           E2E_BASE_URL: http://127.0.0.1:8080
           E2E_ADMIN_EMAIL: admin@example.com
           E2E_ADMIN_PASSWORD: e2e-only-admin-password
+          ACCEPTANCE_FAILURE_PROBE: ${{ inputs.acceptance_failure_probe || false }}
         run: |
           python -m pytest -v -s e2e/test_store.py --junitxml=junit-reports/playwright-store.xml
           python -m pytest -v -s -n 4 e2e/test_ui_matrix.py --junitxml=junit-reports/playwright-matrix.xml
+          if [ "$ACCEPTANCE_FAILURE_PROBE" = "true" ]; then
+            RUN_ACCEPTANCE_FAILURE_PROBE=1 python -m pytest -v -s \
+              e2e/test_acceptance_failure_probe.py \
+              --junitxml=junit-reports/playwright-probe.xml
+          fi
 
       - name: Construir imagen de producción de la API
         id: api_image_build
@@ -134,6 +147,7 @@ jobs:
             junit-reports/backend.xml
             junit-reports/playwright-store.xml
             junit-reports/playwright-matrix.xml
+            junit-reports/playwright-probe.xml
           if-no-files-found: ignore
 
       - name: Registrar resumen y resultados individuales en OpenObserve
@@ -144,6 +158,7 @@ jobs:
           OPENOBSERVE_PASSWORD: ${{ secrets.OPENOBSERVE_PASSWORD }}
           OPENOBSERVE_ORG: ${{ vars.OPENOBSERVE_ORG || 'default' }}
           OPENOBSERVE_STREAM: ${{ vars.OPENOBSERVE_STREAM || 'ci_cd' }}
+          ACCEPTANCE_FAILURE_PROBE: ${{ inputs.acceptance_failure_probe || false }}
         run: |
           python scripts/report_pipeline.py \
             --event test_run \
@@ -165,12 +180,27 @@ jobs:
   deploy:
     name: Desplegar en EC2
     needs: tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.tests.result == 'success'
+    if: >-
+      (
+        (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        || (
+          github.event_name == 'workflow_dispatch'
+          && github.ref == 'refs/heads/main'
+          && inputs.acceptance_failure_probe == true
+        )
+      )
+      && needs.tests.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
+      - name: Impedir despliegue si falla la prueba controlada
+        if: github.event_name == 'workflow_dispatch' && inputs.acceptance_failure_probe == true
+        run: |
+          echo "La prueba controlada no falló como se esperaba; se cancela antes de configurar AWS." >&2
+          exit 1
+
       - name: Descargar código
         uses: actions/checkout@v4
 
